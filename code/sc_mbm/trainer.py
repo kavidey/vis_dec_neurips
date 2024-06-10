@@ -1,7 +1,7 @@
 import math, sys
 import torch
 import sc_mbm.utils as ut
-from torch._six import inf
+from torch import inf
 import numpy as np
 import time
 
@@ -105,7 +105,7 @@ def train_one_epoch_cross(model, model_image, data_loader, optimizer, device, ep
             fmri_support = model(samples, mask_ratio=0, encoder_only=True)
             # print('fmri_support ', fmri_support.shape)
             img_recons_output = model_image(pixel_values=img_prep["pixel_values"], given_mask_ratio=config.img_mask_ratio, fmri_support=fmri_support)
-
+            print(img_support.last_hidden_state.shape, fmri_support.shape)
         # loss.backward()
         # norm = torch.nn.utils.clip_grad_norm_(model.parameters(), config.clip_grad)
         # optimizer.step()

@@ -1,0 +1,9 @@
+data/BOLD5000
+data/Kamitani
+code/generative_models
+wandb
+checkpoints
+code/results
+__pycache__
+*.pyc
+models/ldm/cin256/model.ckpt

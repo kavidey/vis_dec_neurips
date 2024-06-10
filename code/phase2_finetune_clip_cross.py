@@ -22,6 +22,9 @@ from sc_mbm.trainer import train_one_epoch_cross, eval_one_epoch_cross
 from sc_mbm.trainer import NativeScalerWithGradNormCount as NativeScaler
 from sc_mbm.utils import save_model_merge_conf
 
+# generative models code
+from generative_models.sgm.modules.encoders.modules import FrozenOpenCLIPImageEmbedder
+
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ['WANDB_DIR'] = "."
 
@@ -151,6 +154,54 @@ def load_model_image(config):
         param.requires_grad = True
 
     return model_image_new, model_image_config, image_feature_extractor
+
+@torch.no_grad()
+def plot_recon_figures(model, device, dataset, output_path, num_figures = 5, config=None, logger=None, model_without_ddp=None):
+    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
+    model.eval()
+    fig, axs = plt.subplots(num_figures, 3, figsize=(30,15))
+    fig.tight_layout()
+    axs[0,0].set_title('Ground-truth')
+    axs[0,1].set_title('Masked Ground-truth')
+    axs[0,2].set_title('Reconstruction')
+
+    for ax in axs:
+        sample = next(iter(dataloader))['fmri']
+        sample = sample.to(device)
+        _, pred, mask = model(sample, mask_ratio=config.mask_ratio)
+        sample_with_mask = model_without_ddp.patchify(sample).to('cpu').numpy().reshape(-1, model_without_ddp.patch_size)
+        pred = model_without_ddp.unpatchify(pred).to('cpu').numpy().reshape(-1)
+        sample = sample.to('cpu').numpy().reshape(-1)
+        mask = mask.to('cpu').numpy().reshape(-1)
+        # cal the cor
+        cor = np.corrcoef([pred, sample])[0,1]
+
+        x_axis = np.arange(0, sample.shape[-1])
+        # groundtruth
+        ax[0].plot(x_axis, sample)
+        # groundtruth with mask
+        s = 0
+        for x, m in zip(sample_with_mask,mask):
+            if m == 0:
+                ax[1].plot(x_axis[s:s+len(x)], x, color='#1f77b4')
+            s += len(x)
+        # pred
+        ax[2].plot(x_axis, pred)
+        ax[2].set_ylabel('cor: %.4f'%cor, weight = 'bold')
+        ax[2].yaxis.set_label_position("right")
+
+    fig_name = 'reconst-%s'%(datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S"))
+    fig.savefig(os.path.join(output_path, f'{fig_name}.png'))
+    if logger is not None:
+        logger.log_image('reconst', fig)
+    plt.close(fig)
+
+def update_config(args, config):
+    for attr in config.__dict__:
+        if hasattr(args, attr):
+            if getattr(args, attr) != None:
+                setattr(config, attr, getattr(args, attr))
+    return config
 
 def main(config):
 
@@ -294,59 +345,18 @@ def main(config):
         logger.finish()
     return
 
-@torch.no_grad()
-def plot_recon_figures(model, device, dataset, output_path, num_figures = 5, config=None, logger=None, model_without_ddp=None):
-    dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
-    model.eval()
-    fig, axs = plt.subplots(num_figures, 3, figsize=(30,15))
-    fig.tight_layout()
-    axs[0,0].set_title('Ground-truth')
-    axs[0,1].set_title('Masked Ground-truth')
-    axs[0,2].set_title('Reconstruction')
-
-    for ax in axs:
-        sample = next(iter(dataloader))['fmri']
-        sample = sample.to(device)
-        _, pred, mask = model(sample, mask_ratio=config.mask_ratio)
-        sample_with_mask = model_without_ddp.patchify(sample).to('cpu').numpy().reshape(-1, model_without_ddp.patch_size)
-        pred = model_without_ddp.unpatchify(pred).to('cpu').numpy().reshape(-1)
-        sample = sample.to('cpu').numpy().reshape(-1)
-        mask = mask.to('cpu').numpy().reshape(-1)
-        # cal the cor
-        cor = np.corrcoef([pred, sample])[0,1]
-
-        x_axis = np.arange(0, sample.shape[-1])
-        # groundtruth
-        ax[0].plot(x_axis, sample)
-        # groundtruth with mask
-        s = 0
-        for x, m in zip(sample_with_mask,mask):
-            if m == 0:
-                ax[1].plot(x_axis[s:s+len(x)], x, color='#1f77b4')
-            s += len(x)
-        # pred
-        ax[2].plot(x_axis, pred)
-        ax[2].set_ylabel('cor: %.4f'%cor, weight = 'bold')
-        ax[2].yaxis.set_label_position("right")
-
-    fig_name = 'reconst-%s'%(datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S"))
-    fig.savefig(os.path.join(output_path, f'{fig_name}.png'))
-    if logger is not None:
-        logger.log_image('reconst', fig)
-    plt.close(fig)
-
-def update_config(args, config):
-    for attr in config.__dict__:
-        if hasattr(args, attr):
-            if getattr(args, attr) != None:
-                setattr(config, attr, getattr(args, attr))
-    return config
+# clip_seq_dim = 256
+# clip_emb_dim = 1664
+# clip_img_embedder = FrozenOpenCLIPImageEmbedder(
+#     arch="ViT-bigG-14",
+#     version="laion2b_s39b_b160k",
+#     output_tokens=True,
+#     only_tokens=True,
+# )
 
 if __name__ == '__main__':
     args = get_args_parser()
-    # args = args.parse_args()
-    args, unknown = args.parse_known_args()
+    args = args.parse_args()
     config = Config_MBM_finetune_cross()
     config = update_config(args, config)
     main(config)
-    

@@ -1,0 +1,12 @@
+python -m torch.distributed.launch --nproc_per_node=1 code/phase2_finetune_cross.py \
+    --dataset GOD \
+    --pretrain_mbm_path /home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth \
+    --batch_size 4 \
+    --num_epoch 60 \
+    --fmri_decoder_layers 6 \
+    --img_decoder_layers 6 \
+    --img_recon_weight 1.5 \
+    --img_mask_ratio 0.5 \
+    --output_path /home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints \
+    --fmri_recon_weight 0.25 \
+    --mask_ratio 0.75 
