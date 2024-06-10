@@ -36,6 +36,7 @@ processor = CLIPProcessor.from_pretrained("openai/clip-vit-large-patch14")
 
 inputs = processor(images=init_image, return_tensors="pt")
 image_embeddings = model(**inputs).pooler_output
+last_hidden_state = model(**inputs).last_hidden_state
 # %%
 # image_embeddings = image_embeddings.to("cuda").half()
 # pipe.to("cuda")
