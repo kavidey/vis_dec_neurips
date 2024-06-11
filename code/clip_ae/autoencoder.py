@@ -339,21 +339,22 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             self.cross_attention_config,
             clip_dim,
         )
-        for param in self.mae.parameters():
-            param.requires_grad = False
+        # for param in self.mae.parameters():
+        #     param.requires_grad = False
+        self.freeze_mae() # don't want to freeze cross attention layers
 
         ### Cross Attention Layers ##
         # self.map_dims = nn.Conv1d(292, 1, 1)
         # self.unmap_dims = nn.ConvTranspose1d(1, 292, 1)
-        self.encoder = nn.Linear(mae_config_pretrain.embed_dim, clip_dim)
-        self.decoder = nn.Linear(clip_dim, mae_config_pretrain.embed_dim)
-        self.cross_blocks = nn.ModuleList(
-            [
-                ViTMAELayer(cross_attention_config, True)
-                for _ in range(cross_attention_config.num_cross_encoder_layers)
-            ]
-        )
-        self.norm = nn.LayerNorm(clip_dim)
+        # self.encoder = nn.Linear(mae_config_pretrain.embed_dim, clip_dim)
+        # self.decoder = nn.Linear(clip_dim, mae_config_pretrain.embed_dim)
+        # self.cross_blocks = nn.ModuleList(
+        #     [
+        #         ViTMAELayer(cross_attention_config, True)
+        #         for _ in range(cross_attention_config.num_cross_encoder_layers)
+        #     ]
+        # )
+        # self.norm = nn.LayerNorm(clip_dim)
 
         ### LDM ###
         self.ldm = instantiate_from_config(ldm_config.model)
@@ -386,7 +387,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         image = batch["image"]
         fmri = batch["fmri"]
-        print(image.shape, fmri.shape)
+        # print(image.shape, fmri.shape)
         # torch.Size([2, 256, 256, 3]) torch.Size([2, 1, 4656])
         # Generate CLIP Embeddings
         clip_embeddings = self.get_clip_embeddings(image)
@@ -402,7 +403,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
 
         # Generate image with fMRI conditioning
         fmri_latents = self.mae(fmri, encoder_only=True)
-        print(f"{fmri_latents.shape=}")
+        # print(f"{fmri_latents.shape=}")
         x, _ = self.ldm.get_input(batch, self.ldm.first_stage_key)
         loss_img_recon, cc = self.ldm(x, fmri_latents)
 
@@ -412,6 +413,44 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             + self.mae_config.img_recon_weight * loss_img_recon
         )
 
+        self.log("train/loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("train/fmri_loss", loss_fmri_recon, on_epoch=True, logger=True)
+        self.log("train/img_loss", loss_img_recon, on_epoch=True, logger=True)
+
+        return loss
+    
+    def validation_step(self, batch, batch_idx):
+        image = batch["image"]
+        fmri = batch["fmri"]
+        # print(image.shape, fmri.shape)
+        # torch.Size([2, 256, 256, 3]) torch.Size([2, 1, 4656])
+        # Generate CLIP Embeddings
+        clip_embeddings = self.get_clip_embeddings(image)
+        # image_support = self.apply_cross_attention(clip_embeddings)
+
+        # Reconstruct fMRI
+        loss_fmri_recon, pred, mask = self.mae(
+            fmri,
+            encoder_only=False,
+            # image_support=image_support,
+            image_support=clip_embeddings,
+        )
+
+        # Generate image with fMRI conditioning
+        fmri_latents = self.mae(fmri, mask_ratio=0, encoder_only=True)
+        # print(f"{fmri_latents.shape=}")
+        x, _ = self.ldm.get_input(batch, self.ldm.first_stage_key)
+        loss_img_recon, cc = self.ldm(x, fmri_latents)
+
+        # Loss Calculations
+        loss = (
+            self.mae_config.fmri_recon_weight * loss_fmri_recon
+            + self.mae_config.img_recon_weight * loss_img_recon
+        )
+
+        self.log("val/loss", loss, on_epoch=True, prog_bar=True, logger=True)
+        self.log("val/fmri_loss", loss_fmri_recon, on_epoch=True, logger=True)
+        self.log("val/img_loss", loss_img_recon, on_epoch=True, logger=True)
         return loss
 
     def configure_optimizers(self):
@@ -447,6 +486,18 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         x = self.norm(x)
 
         return x
+    
+    def freeze_mae(self):
+        self.mae.patch_embed.requires_grad_(False)
+        self.mae.cls_token.requires_grad_(False)
+        self.mae.pos_embed.requires_grad_(False)
+        self.mae.blocks.requires_grad_(False)
+
+        self.mae.decoder_embed.requires_grad_(False)
+        self.mae.mask_token.requires_grad_(False)
+        self.mae.decoder_blocks.requires_grad_(False)
+        self.mae.decoder_norm.requires_grad_(False)
+        self.mae.decoder_pred.requires_grad_(False)
 
     def generate_conditioned_image(self, condition, num_samples=1):
         # image_recon = self.generate_conditioned_image(fmri_latents)

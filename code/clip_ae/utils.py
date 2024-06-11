@@ -101,7 +101,7 @@ def create_trainer(
         gradient_clip_val=0.5,
         check_val_every_n_epoch=check_val_every_n_epoch,
         # strategy="ddp",
-        fast_dev_run=True
+        # fast_dev_run=True,
     )
 
 

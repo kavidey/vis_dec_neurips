@@ -14,6 +14,7 @@ import argparse
 import torch
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
+import pytorch_lightning as pl
 
 from dataset import create_Kamitani_dataset_distill, create_BOLD5000_dataset_classify
 from config import Config_MBM_finetune_cross, merge_needed_cross_config
@@ -24,7 +25,7 @@ from clip_ae.utils import (
     normalize,
     random_crop,
     channel_last,
-    create_trainer
+    create_trainer,
 )
 from clip_ae.autoencoder import fMRI_CLIP_Cond_LDM
 from sc_mbm.mae_for_image import ViTMAEConfig
@@ -33,6 +34,7 @@ from config import Config_Generative_Model
 
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ["WANDB_DIR"] = "."
+
 
 # %%
 def get_args_parser():
@@ -64,16 +66,16 @@ def get_args_parser():
     parser.add_argument("--load_pretrain_state", type=int)
 
     return parser
+
+
 # %%
 ### Setup configs ##
 # args = get_args_parser()
 # args = args.parse_args()
 config = Config_Generative_Model()
 # config = update_config(args, config)
-# logger = wandb_logger()
-logger = None
-config.logger = logger
 config.clip_dim = 1024
+config.checkpoint_path = Path("../checkpoints")
 
 # Masked Autoencoder
 mae_config = Config_MBM_finetune_cross()
@@ -81,7 +83,7 @@ mae_config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkp
 mae_config.clip_dim = config.clip_dim
 mae_config.fmri_decoder_layers = 6
 mae_config.img_decoder_layers = 6
-mae_config.img_recon_weight = 1.5
+mae_config.img_recon_weight = 1.5 * 10
 mae_config.img_mask_ratio = 0.5
 mae_config.fmri_recon_weight = 0.25
 mae_config.mask_ratio = 0.75
@@ -107,6 +109,30 @@ ldm_ckpt_path = ldm_model_path / "model.ckpt"
 
 torch.manual_seed(config_pretrain.seed)
 np.random.seed(config_pretrain.seed)
+
+config.mae_config = mae_config
+config.ldm_config = ldm_config
+
+config.wandb_name = config.mae_config.wandb_name
+wandb.init(
+    project="vis-dec",
+    config=config,
+    reinit=True,
+    name="ldm_condition",
+)
+# logger = pl.loggers.WandbLogger()
+logger = None
+config.logger = logger
+# %%
+output_sub = config.bold5000_subs if config.dataset == "BOLD5000" else config.kam_subs
+output_path = os.path.join(
+    config.checkpoint_path,
+    "results",
+    "fmri_finetune_{}_{}".format(config.dataset, ".".join(output_sub)),
+    "%s" % (datetime.datetime.now().strftime("%d-%m-%Y-%H-%M-%S")),
+)
+config.output_path = output_path
+Path(output_path).mkdir(parents=True, exist_ok=True)
 # %%
 torch.manual_seed(config_pretrain.seed)
 np.random.seed(config_pretrain.seed)
@@ -145,15 +171,19 @@ elif mae_config.dataset == "BOLD5000":
 else:
     raise NotImplementedError
 
-num_voxels = (sd['model']['pos_embed'].shape[1] - 1)* config_pretrain.patch_size
+num_voxels = (sd["model"]["pos_embed"].shape[1] - 1) * config_pretrain.patch_size
 if train_set.fmri.shape[-1] < num_voxels:
-    train_set.fmri = np.pad(train_set.fmri, ((0,0), (0, num_voxels - train_set.fmri.shape[-1])), 'wrap')
+    train_set.fmri = np.pad(
+        train_set.fmri, ((0, 0), (0, num_voxels - train_set.fmri.shape[-1])), "wrap"
+    )
 else:
     train_set.fmri = train_set.fmri[:, :num_voxels]
 
 # print(test_set.fmri.shape)
 if test_set.fmri.shape[-1] < num_voxels:
-    test_set.fmri = np.pad(test_set.fmri, ((0,0), (0, num_voxels - test_set.fmri.shape[-1])), 'wrap')
+    test_set.fmri = np.pad(
+        test_set.fmri, ((0, 0), (0, num_voxels - test_set.fmri.shape[-1])), "wrap"
+    )
 else:
     test_set.fmri = test_set.fmri[:, :num_voxels]
 # %%
@@ -167,6 +197,7 @@ model = fMRI_CLIP_Cond_LDM(
     clip_dim=config.clip_dim,
     ddim_steps=250,
 )
+create_readme(config, output_path)
 # %%
 # resume training if applicable
 # if config.checkpoint_path is not None:
@@ -175,9 +206,15 @@ model = fMRI_CLIP_Cond_LDM(
 #     print('model resumed')
 # %%
 # finetune the model
-trainer = create_trainer(config.num_epoch, config.precision, config.accumulate_grad, logger, check_val_every_n_epoch=5)
+trainer = create_trainer(
+    config.num_epoch,
+    config.precision,
+    config.accumulate_grad,
+    logger,
+    check_val_every_n_epoch=5,
+)
 
-dataloader = DataLoader(train_set, batch_size=2, shuffle=True)
+dataloader = DataLoader(train_set, batch_size=16, shuffle=True)
 test_loader = DataLoader(test_set, batch_size=len(test_set), shuffle=False)
 
 model.learning_rate = config.lr
@@ -188,15 +225,14 @@ model.ldm.eval_avg = config.eval_avg
 
 trainer.fit(model, dataloader, val_dataloaders=test_loader)
 
-model.unfreeze_whole_model()
+model.ldm.unfreeze_whole_model()
 torch.save(
     {
-        'model_state_dict': model.state_dict(),
-        'config': config,
-        'state': torch.random.get_rng_state()
-
+        "model_state_dict": model.state_dict(),
+        "config": config,
+        "state": torch.random.get_rng_state(),
     },
-    os.path.join(config.output_path, 'checkpoint.pth')
+    os.path.join(output_path, "checkpoint.pth"),
 )
 
 # # generate images
