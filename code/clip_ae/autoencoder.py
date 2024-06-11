@@ -32,7 +32,7 @@ from clip_ae.conditioned_ldm import cond_stage_model
 from dc_ldm.models.diffusion.plms import PLMSSampler
 
 
-def create_fmri_mae(config, sd, config_pretrain, model_image_config, device):
+def create_fmri_mae(config, sd, config_pretrain, model_image_config, device=None):
     num_voxels = (sd["model"]["pos_embed"].shape[1] - 1) * config_pretrain.patch_size
     model = MAEforFMRICross(
         num_voxels=num_voxels,
@@ -45,13 +45,14 @@ def create_fmri_mae(config, sd, config_pretrain, model_image_config, device):
         mlp_ratio=config_pretrain.mlp_ratio,
         focus_range=None,
         use_nature_img_loss=False,
-        # do_cross_attention=config.do_cross_attention,
-        do_cross_attention=False,
+        do_cross_attention=config.do_cross_attention,
+        # do_cross_attention=False,
         cross_encoder_config=model_image_config,
         decoder_depth=config.fmri_decoder_layers,
     )
     model.load_state_dict(sd["model"], strict=False)
-    model.to(device)
+    if device:
+        model.to(device)
 
     patch_embed = PatchEmbed1D(
         num_voxels,
@@ -318,15 +319,12 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         mae_tokens=292,
         clip_dim=1024,
         ddim_steps=250,
-        device="cpu",
     ):
         super().__init__()
 
         self.mae_config = mae_config
         self.cross_attention_config = cross_attention_config
         self.ldm_config = ldm_config
-
-        self.device = device
 
         ### Masked Autoencoder ##
         sd = torch.load(mae_config.pretrain_mbm_path, map_location="cpu")
@@ -336,7 +334,6 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             sd,
             mae_config_pretrain,
             self.cross_attention_config,
-            self.device,
         )
         for param in self.mae.parameters():
             param.requires_grad = False
@@ -382,15 +379,17 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         image = batch["image"]
         fmri = batch["fmri"]
+        print(image.shape,fmri.shape)
         # Generate CLIP Embeddings
         clip_embeddings = self.get_clip_embeddings(image)
-        image_support = self.apply_cross_attention(clip_embeddings)
+        # image_support = self.apply_cross_attention(clip_embeddings)
 
         # Reconstruct fMRI
         pred, metadata = self.mae(
             fmri,
             encoder_only=False,
-            image_support=image_support,
+            # image_support=image_support,
+            image_support=clip_embeddings
         )
 
         # Generate image with fMRI conditioning
@@ -407,10 +406,24 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
 
         return loss
 
-    def get_clip_embeddings(self, image):
-        inputs = self.clip_processor(images=image, return_tensors="pt")
-        clip_embeddings = self.clip_modelmodel(**inputs).last_hidden_state
+    def configure_optimizers(self):
+        lr = self.learning_rate
+        params = list(self.parameters())
+        opt = torch.optim.AdamW(params, lr=lr)
+        return opt
 
+    def get_clip_embeddings(self, image):
+        with torch.no_grad():
+            # print(image)
+            inputs = self.clip_processor(images=image, return_tensors="pt")
+            # print(inputs)
+            pixel_values = inputs["pixel_values"].to(self.device)
+            # print(type(pixel_values))
+            # print(pixel_values.device)
+            # # pixel_values = [ t.to(self.device) for t in pixel_values ]
+            # # print(pixel_values)
+            # # print(pixel_values[0].device)
+            clip_embeddings = self.clip_model(pixel_values).last_hidden_state
         return clip_embeddings
     
     def apply_cross_attention(self, clip_embeddings):

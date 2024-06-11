@@ -7,3 +7,5 @@ code/results
 __pycache__
 *.pyc
 models/ldm/cin256/model.ckpt
+code/data
+lightning_logs

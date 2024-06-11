@@ -71,14 +71,14 @@ config = Config_MBM_finetune_cross()
 # config = update_config(args, config)
 
 # Setup multi-gpu processing
-# multi_gpu = False
-multi_gpu = torch.cuda.device_count() > 1
+multi_gpu = False
+# multi_gpu = torch.cuda.device_count() > 1
 
 if multi_gpu:
     torch.cuda.set_device(config.local_rank)
     torch.distributed.init_process_group(backend="nccl")
 
-config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
+config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
 config.clip_dim = 1664
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
@@ -106,8 +106,8 @@ if config.dataset == "GOD":
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.kam_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
 else:
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.bold5000_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
-logger = wandb_logger(config) if config.local_rank == 0 else None
-# logger = None
+# logger = wandb_logger(config) if config.local_rank == 0 else None
+logger = None
 
 if config.local_rank == 0:
     os.makedirs(output_path, exist_ok=True)
@@ -137,7 +137,7 @@ num_voxels = model.num_voxels
 model_without_ddp = model
 
 model_image = unCLIP(model_image_config, config.clip_dim, device=device)
-model_image.to(device)
+# model_image.to(device)
 
 if multi_gpu:
     model = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model)
