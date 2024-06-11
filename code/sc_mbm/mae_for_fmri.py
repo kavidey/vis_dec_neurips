@@ -716,7 +716,7 @@ class MAEforFMRICross(nn.Module):
     def __init__(self, num_voxels=224, patch_size=16, embed_dim=1024, in_chans=1,
                  depth=24, num_heads=16, decoder_embed_dim=512, 
                  decoder_depth=8, decoder_num_heads=16,
-                 mlp_ratio=4., norm_layer=nn.LayerNorm, focus_range=None, focus_rate=None, img_recon_weight=1.0, 
+                 mlp_ratio=4., cross_map_dim=768, norm_layer=nn.LayerNorm, focus_range=None, focus_rate=None, img_recon_weight=1.0, 
                  use_nature_img_loss=False, do_cross_attention=False, cross_encoder_config=None):
         super().__init__()
 
@@ -738,8 +738,8 @@ class MAEforFMRICross(nn.Module):
             self.cross_blocks = nn.ModuleList([ViTMAELayer(cross_encoder_config, True) for _ in range(cross_encoder_config.num_cross_encoder_layers)])
         self.do_cross_residual = cross_encoder_config.do_cross_residual
         #to be removed, temporary computation
-        self.cross_map_in = nn.Linear(embed_dim, 768, bias=True)
-        self.cross_map_out = nn.Linear(768, embed_dim, bias=True)
+        self.cross_map_in = nn.Linear(embed_dim, cross_map_dim, bias=True)
+        self.cross_map_out = nn.Linear(cross_map_dim, embed_dim, bias=True)
 
         self.norm = norm_layer(embed_dim)
         # --------------------------------------------------------------------------

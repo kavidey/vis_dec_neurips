@@ -32,7 +32,9 @@ from clip_ae.conditioned_ldm import cond_stage_model
 from dc_ldm.models.diffusion.plms import PLMSSampler
 
 
-def create_fmri_mae(config, sd, config_pretrain, model_image_config, device=None):
+def create_fmri_mae(
+    config, sd, config_pretrain, model_image_config, clip_dim, device=None
+):
     num_voxels = (sd["model"]["pos_embed"].shape[1] - 1) * config_pretrain.patch_size
     model = MAEforFMRICross(
         num_voxels=num_voxels,
@@ -49,6 +51,7 @@ def create_fmri_mae(config, sd, config_pretrain, model_image_config, device=None
         # do_cross_attention=False,
         cross_encoder_config=model_image_config,
         decoder_depth=config.fmri_decoder_layers,
+        cross_map_dim=clip_dim,
     )
     model.load_state_dict(sd["model"], strict=False)
     if device:
@@ -206,7 +209,7 @@ class fMRICLIPAutoEncoder(nn.Module):
         config_pretrain = sd["config"]
 
         self.mae, self.num_voxels, self.patch_embed = create_fmri_mae(
-            config, sd, config_pretrain, model_image_config, device
+            config, sd, config_pretrain, model_image_config, clip_dim, device
         )
 
         # Freeze Model so we're only learning linear layers
@@ -334,6 +337,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             sd,
             mae_config_pretrain,
             self.cross_attention_config,
+            clip_dim,
         )
         for param in self.mae.parameters():
             param.requires_grad = False
@@ -376,29 +380,33 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             "openai/clip-vit-large-patch14"
         )
 
+    def on_fit_start(self):
+        self.ldm.cond_stage_model.to(self.device)
+
     def training_step(self, batch, batch_idx):
         image = batch["image"]
         fmri = batch["fmri"]
-        print(image.shape,fmri.shape)
+        print(image.shape, fmri.shape)
+        # torch.Size([2, 256, 256, 3]) torch.Size([2, 1, 4656])
         # Generate CLIP Embeddings
         clip_embeddings = self.get_clip_embeddings(image)
         # image_support = self.apply_cross_attention(clip_embeddings)
 
         # Reconstruct fMRI
-        pred, metadata = self.mae(
+        loss_fmri_recon, pred, mask = self.mae(
             fmri,
             encoder_only=False,
             # image_support=image_support,
-            image_support=clip_embeddings
+            image_support=clip_embeddings,
         )
 
         # Generate image with fMRI conditioning
         fmri_latents = self.mae(fmri, encoder_only=True)
-        loss_img_recon, cc = self(image, fmri_latents)
+        print(f"{fmri_latents.shape=}")
+        x, _ = self.ldm.get_input(batch, self.ldm.first_stage_key)
+        loss_img_recon, cc = self.ldm(x, fmri_latents)
 
         # Loss Calculations
-        loss_fmri_recon = self.mae.recon_loss(fmri, pred, metadata[0])
-
         loss = (
             self.mae_config.fmri_recon_weight * loss_fmri_recon
             + self.mae_config.img_recon_weight * loss_img_recon
@@ -425,7 +433,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             # # print(pixel_values[0].device)
             clip_embeddings = self.clip_model(pixel_values).last_hidden_state
         return clip_embeddings
-    
+
     def apply_cross_attention(self, clip_embeddings):
         cross_x = x.clone()
 
@@ -441,6 +449,10 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         return x
 
     def generate_conditioned_image(self, condition, num_samples=1):
+        # image_recon = self.generate_conditioned_image(fmri_latents)
+        # print(f"{image.shape=}, {image_recon.shape=}")
+        # loss_img_recon = (image-image_recon.permute(0, 2, 3, 1)) ** 2
+
         sampler = PLMSSampler(self.ldm)
 
         shape = (
@@ -449,17 +461,17 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
             self.ldm_config.model.params.image_size,
         )
 
-        c = self.ldm.get_learned_conditioning(
-            repeat(condition, "h w -> c h w", c=num_samples).to(self.device)
-        )
+        c = self.ldm.cond_stage_model(condition)
+        # c = condition
 
         samples_ddim, _ = sampler.sample(
             S=1,  # ddim_steps,
             conditioning=c,
-            batch_size=num_samples,
+            batch_size=c.shape[0],
             shape=shape,
             verbose=False,
         )
 
         x_samples_ddim = self.ldm.decode_first_stage(samples_ddim)
         x_samples_ddim = torch.clamp((x_samples_ddim + 1.0) / 2.0, min=0.0, max=1.0)
+        return x_samples_ddim

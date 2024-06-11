@@ -66,10 +66,19 @@ def get_args_parser():
     return parser
 # %%
 ### Setup configs ##
+# args = get_args_parser()
+# args = args.parse_args()
+config = Config_Generative_Model()
+# config = update_config(args, config)
+# logger = wandb_logger()
+logger = None
+config.logger = logger
+config.clip_dim = 1024
+
 # Masked Autoencoder
 mae_config = Config_MBM_finetune_cross()
 mae_config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
-mae_config.clip_dim = 1664
+mae_config.clip_dim = config.clip_dim
 mae_config.fmri_decoder_layers = 6
 mae_config.img_decoder_layers = 6
 mae_config.img_recon_weight = 1.5
@@ -87,7 +96,7 @@ cross_attention_config.num_cross_encoder_layers = mae_config.num_cross_encoder_l
 # cross_attention_config.do_cross_attention = config.do_cross_attention
 cross_attention_config.do_cross_residual = mae_config.do_cross_residual
 cross_attention_config.decoder_num_hidden_layers = mae_config.img_decoder_layers
-cross_attention_config.hidden_size = 1664
+cross_attention_config.hidden_size = config.clip_dim
 cross_attention_config.num_attention_heads = 16
 
 # Latent Diffusion Model with Conditioning
@@ -153,19 +162,12 @@ model = fMRI_CLIP_Cond_LDM(
     cross_attention_config,
     ldm_config,
     ldm_ckpt_path,
-    mae_tokens=292,
-    clip_dim=1024,
+    # mae_tokens=292,
+    mae_tokens=73,
+    clip_dim=config.clip_dim,
     ddim_steps=250,
 )
 # %%
-# args = get_args_parser()
-# args = args.parse_args()
-config = Config_Generative_Model()
-# config = update_config(args, config)
-# logger = wandb_logger()
-logger = None
-config.logger = logger
-
 # resume training if applicable
 # if config.checkpoint_path is not None:
 #     model_meta = torch.load(config.checkpoint_path, map_location='cpu')

@@ -51,7 +51,7 @@ num_samples = 1
 
 with model.ema_scope():
     model.eval()
-    latent = torch.rand((292, 1024))
+    latent = torch.rand((3, 292, 1024))
     assert latent.shape[-1] == fmri_latent_dim, 'dim error'
 
     shape = (
@@ -60,14 +60,12 @@ with model.ema_scope():
         config.model.params.image_size,
     )
 
-    c = model.get_learned_conditioning(
-        repeat(latent, "h w -> c h w", c=num_samples).to(device)
-    )
-    c = torch.zeros((1, 256, 512)).to(device).float()
+    c = model.cond_stage_model(latent.to(device))
+    # c = torch.zeros((2, 256, 512)).to(device).float()
     samples_ddim, _ = sampler.sample(
         S=1,  # ddim_steps,
         conditioning=c,
-        batch_size=num_samples,
+        batch_size=c.shape[0],
         shape=shape,
         verbose=False,
     )
@@ -77,5 +75,7 @@ with model.ema_scope():
 
 # img = 255. * rearrange(x_samples_ddim, 'b c h w -> b h w c').cpu().numpy()
 # Image.fromarray(img.astype(np.uint8))
-F.to_pil_image(x_samples_ddim[0].cpu())
+for i,sample in enumerate(x_samples_ddim):
+    img = F.to_pil_image(sample.cpu())
+    img.save(f"test6-{i}.png")
 # %%
