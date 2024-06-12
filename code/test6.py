@@ -63,7 +63,7 @@ with model.ema_scope():
     c = model.cond_stage_model(latent.to(device))
     # c = torch.zeros((2, 256, 512)).to(device).float()
     samples_ddim, _ = sampler.sample(
-        S=1,  # ddim_steps,
+        S=ddim_steps,
         conditioning=c,
         batch_size=c.shape[0],
         shape=shape,

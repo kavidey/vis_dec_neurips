@@ -372,6 +372,9 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         self.ldm.ch_mult = (
             ldm_config.model.params.first_stage_config.params.ddconfig.ch_mult
         )
+        self.ldm.freeze_whole_model()
+        self.ldm.unfreeze_cond_stage()
+        self.ldm.train_cond_stage_only = True
 
         ### CLIP ###
         self.clip_model = CLIPVisionModel.from_pretrained(
@@ -501,7 +504,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         self.mae.decoder_norm.requires_grad_(False)
         self.mae.decoder_pred.requires_grad_(False)
 
-    def generate_conditioned_image(self, condition, num_samples=1):
+    def generate_conditioned_image(self, condition):
         # image_recon = self.generate_conditioned_image(fmri_latents)
         # print(f"{image.shape=}, {image_recon.shape=}")
         # loss_img_recon = (image-image_recon.permute(0, 2, 3, 1)) ** 2
@@ -518,7 +521,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         # c = condition
 
         samples_ddim, _ = sampler.sample(
-            S=1,  # ddim_steps,
+            S=250,  # ddim_steps,
             conditioning=c,
             batch_size=c.shape[0],
             shape=shape,

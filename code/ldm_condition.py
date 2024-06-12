@@ -13,6 +13,7 @@ import argparse
 
 import torch
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 from torch.utils.data import DataLoader
 import pytorch_lightning as pl
 
@@ -112,7 +113,7 @@ np.random.seed(config_pretrain.seed)
 config.mae_config = mae_config.__dict__
 config.ldm_config = ldm_config
 
-wb = True
+wb = False
 if wb:
     wandb.init(
         project="vis-dec",
@@ -201,6 +202,20 @@ model = fMRI_CLIP_Cond_LDM(
 )
 # create_readme(config, output_path)
 # %%
+# model.load_state_dict(
+#     torch.load(
+#         "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/results/fmri_finetune_GOD_sbj_3/12-06-2024-09-49-15/checkpoint.pth"
+#     )["model_state_dict"]
+# )
+# model.to(torch.device("cuda"))
+# # %%
+# img_test = test_set[20]["image"]
+# fmri_test = test_set[20]["fmri"].to(torch.device("cuda"))
+# fmri_latents = model.mae(fmri_test[None], encoder_only=True)
+# recon = model.generate_conditioned_image(fmri_latents)
+# F.to_pil_image(recon[0].cpu())
+# F.to_pil_image(torch.from_numpy(img_test).permute((2,0,1)))
+# %%
 # resume training if applicable
 # if config.checkpoint_path is not None:
 #     model_meta = torch.load(config.checkpoint_path, map_location='cpu')
@@ -209,10 +224,11 @@ model = fMRI_CLIP_Cond_LDM(
 # %%
 # finetune the model
 checkpoint_callback = pl.callbacks.ModelCheckpoint(
-    # dirpath=checkpoints_path, # <--- specify this on the trainer itself for version control
+    dirpath=output_path,
+    monitor=None,
+    save_top_k=-1,
+    save_last=False,
     filename="ldm_condition.e{epoch:02d}",
-    every_n_epochs=1,
-    save_top_k=-1,  # <--- this is important!
 )
 trainer = pl.Trainer(
     accelerator="gpu" if torch.cuda.is_available() else "cpu",
@@ -222,19 +238,16 @@ trainer = pl.Trainer(
     accumulate_grad_batches=config.accumulate_grad,
     check_val_every_n_epoch=5,
     # strategy="ddp",
-    # fast_dev_run=True,
+    fast_dev_run=True,
     callbacks=[checkpoint_callback],
     default_root_dir=output_path,
+    devices=1,
 )
 
 dataloader = DataLoader(train_set, batch_size=16, shuffle=True)
 test_loader = DataLoader(test_set, batch_size=len(test_set), shuffle=False)
 
 model.learning_rate = config.lr
-model.ldm.unfreeze_whole_model()
-model.ldm.freeze_first_stage()
-model.ldm.train_cond_stage_only = True
-model.ldm.eval_avg = config.eval_avg
 
 trainer.fit(model, dataloader, val_dataloaders=test_loader)
 
