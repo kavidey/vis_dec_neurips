@@ -82,29 +82,6 @@ class wandb_logger:
         wandb.finish(quiet=True)
 
 
-def create_trainer(
-    num_epoch,
-    precision=32,
-    accumulate_grad_batches=2,
-    logger=None,
-    check_val_every_n_epoch=0,
-):
-    acc = "gpu" if torch.cuda.is_available() else "cpu"
-    return pl.Trainer(
-        accelerator=acc,
-        max_epochs=num_epoch,
-        logger=logger,
-        precision=precision,
-        accumulate_grad_batches=accumulate_grad_batches,
-        enable_checkpointing=False,
-        enable_model_summary=False,
-        gradient_clip_val=0.5,
-        check_val_every_n_epoch=check_val_every_n_epoch,
-        # strategy="ddp",
-        # fast_dev_run=True,
-    )
-
-
 from generative_models.sgm.util import append_dims
 
 

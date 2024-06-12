@@ -380,6 +380,8 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         self.clip_processor = CLIPProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
         )
+        for p in self.clip_model.parameters():
+            p.requires_grad = False
 
     def on_fit_start(self):
         self.ldm.cond_stage_model.to(self.device)
@@ -419,39 +421,39 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
 
         return loss
     
-    def validation_step(self, batch, batch_idx):
-        image = batch["image"]
-        fmri = batch["fmri"]
-        # print(image.shape, fmri.shape)
-        # torch.Size([2, 256, 256, 3]) torch.Size([2, 1, 4656])
-        # Generate CLIP Embeddings
-        clip_embeddings = self.get_clip_embeddings(image)
-        # image_support = self.apply_cross_attention(clip_embeddings)
+    # def validation_step(self, batch, batch_idx):
+    #     image = batch["image"]
+    #     fmri = batch["fmri"]
+    #     # print(image.shape, fmri.shape)
+    #     # torch.Size([2, 256, 256, 3]) torch.Size([2, 1, 4656])
+    #     # Generate CLIP Embeddings
+    #     clip_embeddings = self.get_clip_embeddings(image)
+    #     # image_support = self.apply_cross_attention(clip_embeddings)
 
-        # Reconstruct fMRI
-        loss_fmri_recon, pred, mask = self.mae(
-            fmri,
-            encoder_only=False,
-            # image_support=image_support,
-            image_support=clip_embeddings,
-        )
+    #     # Reconstruct fMRI
+    #     loss_fmri_recon, pred, mask = self.mae(
+    #         fmri,
+    #         encoder_only=False,
+    #         # image_support=image_support,
+    #         image_support=clip_embeddings,
+    #     )
 
-        # Generate image with fMRI conditioning
-        fmri_latents = self.mae(fmri, mask_ratio=0, encoder_only=True)
-        # print(f"{fmri_latents.shape=}")
-        x, _ = self.ldm.get_input(batch, self.ldm.first_stage_key)
-        loss_img_recon, cc = self.ldm(x, fmri_latents)
+    #     # Generate image with fMRI conditioning
+    #     fmri_latents = self.mae(fmri, mask_ratio=0, encoder_only=True)
+    #     # print(f"{fmri_latents.shape=}")
+    #     x, _ = self.ldm.get_input(batch, self.ldm.first_stage_key)
+    #     loss_img_recon, cc = self.ldm(x, fmri_latents)
 
-        # Loss Calculations
-        loss = (
-            self.mae_config.fmri_recon_weight * loss_fmri_recon
-            + self.mae_config.img_recon_weight * loss_img_recon
-        )
+    #     # Loss Calculations
+    #     loss = (
+    #         self.mae_config.fmri_recon_weight * loss_fmri_recon
+    #         + self.mae_config.img_recon_weight * loss_img_recon
+    #     )
 
-        self.log("val/loss", loss, on_epoch=True, prog_bar=True, logger=True)
-        self.log("val/fmri_loss", loss_fmri_recon, on_epoch=True, logger=True)
-        self.log("val/img_loss", loss_img_recon, on_epoch=True, logger=True)
-        return loss
+    #     self.log("val/loss", loss, on_epoch=True, prog_bar=True, logger=True)
+    #     self.log("val/fmri_loss", loss_fmri_recon, on_epoch=True, logger=True)
+    #     self.log("val/img_loss", loss_img_recon, on_epoch=True, logger=True)
+    #     return loss
 
     def configure_optimizers(self):
         lr = self.learning_rate

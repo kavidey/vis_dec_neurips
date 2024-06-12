@@ -25,7 +25,6 @@ from clip_ae.utils import (
     normalize,
     random_crop,
     channel_last,
-    create_trainer,
 )
 from clip_ae.autoencoder import fMRI_CLIP_Cond_LDM
 from sc_mbm.mae_for_image import ViTMAEConfig
@@ -110,18 +109,21 @@ ldm_ckpt_path = ldm_model_path / "model.ckpt"
 torch.manual_seed(config_pretrain.seed)
 np.random.seed(config_pretrain.seed)
 
-config.mae_config = mae_config
+config.mae_config = mae_config.__dict__
 config.ldm_config = ldm_config
 
-config.wandb_name = config.mae_config.wandb_name
-wandb.init(
-    project="vis-dec",
-    config=config,
-    reinit=True,
-    name="ldm_condition",
-)
-# logger = pl.loggers.WandbLogger()
-logger = None
+wb = True
+if wb:
+    wandb.init(
+        project="vis-dec",
+        config=config,
+        reinit=True,
+        name="ldm_condition",
+    )
+    logger = pl.loggers.WandbLogger()
+else:
+    logger = None
+config.mae_config = mae_config
 config.logger = logger
 # %%
 output_sub = config.bold5000_subs if config.dataset == "BOLD5000" else config.kam_subs
@@ -197,7 +199,7 @@ model = fMRI_CLIP_Cond_LDM(
     clip_dim=config.clip_dim,
     ddim_steps=250,
 )
-create_readme(config, output_path)
+# create_readme(config, output_path)
 # %%
 # resume training if applicable
 # if config.checkpoint_path is not None:
@@ -206,12 +208,23 @@ create_readme(config, output_path)
 #     print('model resumed')
 # %%
 # finetune the model
-trainer = create_trainer(
-    config.num_epoch,
-    config.precision,
-    config.accumulate_grad,
-    logger,
+checkpoint_callback = pl.callbacks.ModelCheckpoint(
+    # dirpath=checkpoints_path, # <--- specify this on the trainer itself for version control
+    filename="ldm_condition.e{epoch:02d}",
+    every_n_epochs=1,
+    save_top_k=-1,  # <--- this is important!
+)
+trainer = pl.Trainer(
+    accelerator="gpu" if torch.cuda.is_available() else "cpu",
+    max_epochs=config.num_epoch,
+    logger=logger,
+    precision=config.precision,
+    accumulate_grad_batches=config.accumulate_grad,
     check_val_every_n_epoch=5,
+    # strategy="ddp",
+    # fast_dev_run=True,
+    callbacks=[checkpoint_callback],
+    default_root_dir=output_path,
 )
 
 dataloader = DataLoader(train_set, batch_size=16, shuffle=True)
