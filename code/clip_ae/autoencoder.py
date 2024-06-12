@@ -12,7 +12,8 @@ import wandb
 from torchvision.utils import make_grid
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-from transformers import CLIPProcessor, CLIPVisionModel
+from transformers import CLIPProcessor, CLIPVisionModel, CLIPImageProcessor
+from diffusers import UNet2DConditionModel, PNDMScheduler, AutoencoderKL
 
 # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
 import sys
@@ -29,7 +30,7 @@ from sc_mbm.mae_for_fmri import MAEforFMRICross, PatchEmbed1D
 from sc_mbm.mae_for_image import ViTMAEConfig, ViTMAELayer
 from clip_ae.utils import unclip_recon, instantiate_from_config
 from clip_ae.conditioned_ldm import cond_stage_model
-from dc_ldm.models.diffusion.plms import PLMSSampler
+# from dc_ldm.models.diffusion.plms import PLMSSampler
 
 
 def create_fmri_mae(
@@ -198,6 +199,123 @@ class unCLIP(nn.Module):
         return np.mean(corrs)
 
 
+class ConditionLDM(nn.Module):
+    def __init__(self, model_image_config, clip_dim=1024, device=torch.device("cpu")):
+        super().__init__()
+
+        self.device = device
+
+        self.clip_model = CLIPVisionModel.from_pretrained(
+            "openai/clip-vit-large-patch14"
+        )
+        self.clip_model.to(device)
+        self.clip_processor = CLIPProcessor.from_pretrained(
+            "openai/clip-vit-large-patch14"
+        )
+
+        self.clip_seq_dim = 257
+        self.clip_emb_dim = 1024
+
+        self.diffusion_model_id = "CompVis/stable-diffusion-v1-4"
+        self.unet = UNet2DConditionModel.from_pretrained(self.diffusion_model_id, subfolder="unet")
+        for param in [p for n, p in self.unet.named_parameters() if "attn2" not in n]:
+            param.requires_grad = False
+        self.unet.train()
+        self.unet.to(device)
+
+        self.feature_extractor = CLIPImageProcessor.from_pretrained(self.diffusion_model_id, subfolder="feature_extractor")
+
+        self.vae = AutoencoderKL.from_pretrained(self.diffusion_model_id, subfolder="vae")
+        self.vae.requires_grad_(False)
+        self.vae.to(device)
+
+        self.scheduler = PNDMScheduler.from_pretrained(self.diffusion_model_id, subfolder='scheduler')
+
+        self.cross_blocks = nn.ModuleList(
+            [
+                ViTMAELayer(model_image_config, True)
+                for _ in range(model_image_config.num_cross_encoder_layers)
+            ]
+        )
+        for block in self.cross_blocks:
+            block.cuda()
+        
+        self.norm = nn.LayerNorm(clip_dim)
+        self.norm.cuda()
+
+        self.map_dims = nn.Linear(clip_dim, 768)
+        self.map_dims.cuda()
+
+    def encode_clip(self, img):
+        inputs = self.clip_processor(images=img, return_tensors="pt", do_rescale=False)
+        pixel_values = inputs["pixel_values"].to(self.device)
+        clip_embeddings = self.clip_model(pixel_values).last_hidden_state
+        return clip_embeddings
+
+    def diffusion_step(self, image, condition):
+        '''
+        condition needs to have shape (batch, X, 768)
+        '''
+        img = self.feature_extractor(image)
+        img = torch.vstack([torch.from_numpy(t)[None] for t in img['pixel_values']])
+        img = img.to(image.device)
+        latents = self.vae.encode(img).latent_dist.sample() * self.vae.config.scaling_factor
+        noise = torch.randn_like(latents)
+
+        timesteps = torch.randint(
+            0,
+            self.scheduler.config.num_train_timesteps,
+            (latents.size(0),),
+            device=latents.device,
+        ).long()
+
+        noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
+
+        condition = self.map_dims(condition)
+
+        unet_output = self.unet(noisy_latents, timesteps, encoder_hidden_states=condition).sample
+
+        loss = F.mse_loss(unet_output, noise)
+
+        return loss
+
+
+    def forward(self, img, encoder_only=False, fmri_support=None):
+        embeddings = self.encode_clip(img)
+        if encoder_only:
+            return embeddings
+        else:
+            x = embeddings
+            cross_x = x.clone()
+
+            for blk in self.cross_blocks:
+                # print(cross_x.device, fmri_support.device)
+                # print(blk)
+                cross_x_full = blk(cross_x, hidden_states_mod2=fmri_support)
+                cross_x = cross_x_full[0]
+
+            x = x + cross_x
+
+            x = self.norm(x)
+
+            return self.diffusion_step(img, x)
+
+    def recon_loss(self, imgs, pred):
+        """
+        imgs: [N, 3, H, W] pred: [N, L, p*p*3] mask: [N, L], 0 is keep, 1 is remove,
+        """
+        loss = ((imgs - pred) ** 2).mean()
+        return loss
+
+    def calc_corr(self, imgs, pred):
+        f_imgs = imgs.reshape(len(imgs), -1).cpu()
+        f_pred = pred.reshape(len(pred), -1).cpu()
+
+        corrs = [np.corrcoef(f_imgs[i], f_pred[i])[0][1] for i in range(len(imgs))]
+
+        return np.mean(corrs)
+
+
 class fMRICLIPAutoEncoder(nn.Module):
     def __init__(
         self, config, model_image_config, clip_dim=1024, device=torch.device("cpu")
@@ -216,8 +334,8 @@ class fMRICLIPAutoEncoder(nn.Module):
         for param in self.mae.parameters():
             param.requires_grad = False
 
-        # self.map_dims = nn.Conv1d(292, 1, 1)
-        # self.unmap_dims = nn.ConvTranspose1d(1, 292, 1)
+        self.map_dims = nn.Conv1d(73, 257, 1)
+        self.unmap_dims = nn.ConvTranspose1d(257, 73, 1)
         self.encoder = nn.Linear(config_pretrain.embed_dim, clip_dim)
         self.decoder = nn.Linear(clip_dim, config_pretrain.embed_dim)
         self.cross_blocks = nn.ModuleList(
@@ -244,7 +362,7 @@ class fMRICLIPAutoEncoder(nn.Module):
         latent, metadata = self.encode_fmri(sample, mask_ratio=self.config.mask_ratio)
         # print(latent.shape, self.map_dims(latent).shape)
         # print(f"{latent.shape=}")
-        # latent = self.map_dims(latent)
+        latent = self.map_dims(latent)
         x = self.encoder(latent)
         # print(f"{x.shape=}")
         if encoder_only:
@@ -266,7 +384,7 @@ class fMRICLIPAutoEncoder(nn.Module):
             # print(f"{x.shape=}")
 
             # print(f"{x.shape=}, {self.unmap_dims(x).shape=}")
-            # x = self.unmap_dims(x)
+            x = self.unmap_dims(x)
             latent = self.decoder(x)
             pred = self.decode_fmri(latent, metadata)
 
@@ -341,7 +459,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         )
         # for param in self.mae.parameters():
         #     param.requires_grad = False
-        self.freeze_mae() # don't want to freeze cross attention layers
+        self.freeze_mae()  # don't want to freeze cross attention layers
 
         ### Cross Attention Layers ##
         # self.map_dims = nn.Conv1d(292, 1, 1)
@@ -423,7 +541,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         self.log("train/img_loss", loss_img_recon, on_epoch=True, logger=True)
 
         return loss
-    
+
     # def validation_step(self, batch, batch_idx):
     #     image = batch["image"]
     #     fmri = batch["fmri"]
@@ -467,7 +585,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
     def get_clip_embeddings(self, image):
         with torch.no_grad():
             # print(image)
-            inputs = self.clip_processor(images=image, return_tensors="pt")
+            inputs = self.clip_processor(images=image, do_rescale=False, return_tensors="pt")
             # print(inputs)
             pixel_values = inputs["pixel_values"].to(self.device)
             # print(type(pixel_values))
@@ -491,7 +609,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         x = self.norm(x)
 
         return x
-    
+
     def freeze_mae(self):
         self.mae.patch_embed.requires_grad_(False)
         self.mae.cls_token.requires_grad_(False)

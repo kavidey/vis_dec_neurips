@@ -24,7 +24,7 @@ from clip_ae.utils import (
     add_weight_decay,
     save_model_merge_conf,
 )
-from clip_ae.autoencoder import fMRICLIPAutoEncoder, unCLIP
+from clip_ae.autoencoder import fMRICLIPAutoEncoder, ConditionLDM
 from sc_mbm.mae_for_image import ViTMAEConfig, ViTMAELayer
 
 os.environ["WANDB_START_METHOD"] = "thread"
@@ -79,7 +79,7 @@ if multi_gpu:
     torch.distributed.init_process_group(backend="nccl")
 
 config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
-config.clip_dim = 1664
+config.clip_dim = 1024
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
 config.img_recon_weight = 1.5
@@ -127,7 +127,7 @@ model_image_config.num_cross_encoder_layers = config.num_cross_encoder_layers
 # model_image_config.do_cross_attention = config.do_cross_attention
 model_image_config.do_cross_residual = config.do_cross_residual
 model_image_config.decoder_num_hidden_layers = config.img_decoder_layers
-model_image_config.hidden_size = 1664
+model_image_config.hidden_size = config.clip_dim
 model_image_config.num_attention_heads = 16
 # print(model_image_config)
 
@@ -136,7 +136,7 @@ model.to(device)
 num_voxels = model.num_voxels
 model_without_ddp = model
 
-model_image = unCLIP(model_image_config, config.clip_dim, device=device)
+model_image = ConditionLDM(model_image_config, config.clip_dim, device=device)
 # model_image.to(device)
 
 if multi_gpu:
@@ -273,7 +273,8 @@ for ep in range(config.num_epoch):
 
             # reconstruct image
             fmri_support = model(samples, encoder_only=True)
-            img_recons_output = model_image(
+            # print(f"{img_support.shape=}, {fmri_support.shape=}")
+            loss_img_recon = model_image(
                 images,
                 encoder_only=False,
                 fmri_support=fmri_support,
@@ -287,7 +288,6 @@ for ep in range(config.num_epoch):
             # torch.Size([4, 197, 768]) torch.Size([4, 292, 1024])
 
             loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
-            loss_img_recon = model_image.recon_loss(images, img_recons_output)
 
         loss = (
             config.fmri_recon_weight * loss_fmri_recon
@@ -299,13 +299,16 @@ for ep in range(config.num_epoch):
         optimizer.step()
 
         loss_value = loss.item()
-        if config.local_rank == 0: print(f"loss:{loss.item()}, elapsed: {(time.time()-start_time)/60:.1f} min")
+        # if config.local_rank == 0: print(f"loss:{loss.item()}, elapsed: {(time.time()-start_time)/60:.1f} min")
 
         if not math.isfinite(loss_value):
             print(
                 f"Loss is {loss_value}, stopping training at step {data_iter_step} epoch {ep}"
             )
             sys.exit(1)
+        
+        if data_iter_step > 10:
+            break
 
         pred = pred.to("cpu").detach()
         samples = samples.to("cpu").detach()
@@ -318,13 +321,13 @@ for ep in range(config.num_epoch):
                 ]
             )
         ).item()
-        cor_image = model_image.calc_corr(images, img_recons_output)
+        # cor_image = model_image.calc_corr(images, img_recons_output)
         optimizer.zero_grad()
 
         total_loss.append(loss_fmri_recon.item())
         total_loss_image.append(loss_img_recon.item())
         total_cor.append(cor)
-        total_cor_image.append(cor_image)
+        # total_cor_image.append(cor_image)
 
     if logger is not None:
         lr = optimizer.param_groups[0]["lr"]
@@ -332,7 +335,7 @@ for ep in range(config.num_epoch):
         logger.log("train_loss_step_image", np.mean(total_loss_image), step=ep)
         logger.log("lr", lr, step=ep)
         logger.log("cor_fmri", np.mean(total_cor), step=ep)
-        logger.log("cor_image", np.mean(cor_image), step=ep)
+        # logger.log("cor_image", np.mean(cor_image), step=ep)
         if start_time is not None:
             logger.log("time (min)", (time.time() - start_time) / 60.0, step=ep)
     if config.local_rank == 0:
@@ -378,14 +381,13 @@ for ep in range(config.num_epoch):
             # add mask_ratio = 0
             fmri_support = model(samples, encoder_only=True)
             # print('fmri_support ', fmri_support.shape)
-            img_recons_output = model_image(
+            loss_img_recon = model_image(
                 images,
                 encoder_only=False,
                 fmri_support=fmri_support,
             )
 
             loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
-            loss_img_recon = model_image.recon_loss(images, img_recons_output)
 
         loss = loss_fmri_recon + loss_img_recon
 
@@ -412,18 +414,18 @@ for ep in range(config.num_epoch):
                 ]
             )
         ).item()
-        cor_image = model_image.calc_corr(images, img_recons_output)
+        # cor_image = model_image.calc_corr(images, img_recons_output)
 
         total_loss.append(loss_fmri_recon.item())
         total_loss_image.append(loss_img_recon.item())
         total_cor.append(cor)
-        total_cor_image.append(cor_image)
+        # total_cor_image.append(cor_image)
 
     if logger is not None:
         logger.log("test_loss_step_fmri", np.mean(total_loss), step=ep)
         logger.log("test_loss_step_image", np.mean(total_loss_image), step=ep)
         logger.log("test_cor_fmri", np.mean(total_cor), step=ep)
-        logger.log("test_cor_image", np.mean(cor_image), step=ep)
+        # logger.log("test_cor_image", np.mean(cor_image), step=ep)
         if start_time is not None:
             logger.log("time (min)", (time.time() - start_time) / 60.0, step=ep)
     if config.local_rank == 0:
