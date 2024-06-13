@@ -526,7 +526,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         self.clip_processor = CLIPProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
         )
-        self.clip_model.requires_grad_(False)
+        # self.clip_model.requires_grad_(False)
 
     def on_fit_start(self):
         self.ldm.cond_stage_model.to(self.device)
