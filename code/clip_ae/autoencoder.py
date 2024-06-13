@@ -256,7 +256,7 @@ class ConditionLDM(nn.Module):
         '''
         condition needs to have shape (batch, X, 768)
         '''
-        img = self.feature_extractor(image)
+        img = self.feature_extractor(image, do_rescale=False)
         img = torch.vstack([torch.from_numpy(t)[None] for t in img['pixel_values']])
         img = img.to(image.device)
         latents = self.vae.encode(img).latent_dist.sample() * self.vae.config.scaling_factor
@@ -314,6 +314,31 @@ class ConditionLDM(nn.Module):
         corrs = [np.corrcoef(f_imgs[i], f_pred[i])[0][1] for i in range(len(imgs))]
 
         return np.mean(corrs)
+    
+    @torch.no_grad()
+    def generate_image(self, condition, steps):
+        condition = self.map_dims(condition)
+        
+        self.scheduler.set_timesteps(steps)
+        scheduler_steps = self.scheduler.timesteps
+        latents = torch.randn((condition.shape[0], 4, 64, 64), device=self.device) * self.scheduler.init_noise_sigma
+
+        for t in scheduler_steps:
+            latent_model_input = self.scheduler.scale_model_input(latents, t)
+            noise_pred = self.unet(
+                latent_model_input,
+                t,
+                encoder_hidden_states=condition,
+                return_dict=False,
+            )[0]
+            latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
+            
+        latents_scaled = latents / self.vae.config.scaling_factor
+        image = self.vae.decode(latents_scaled).sample.detach()
+
+        image = (image / 2 + 0.5).clamp(0, 1)
+
+        return transforms.Resize(256)(image)
 
 
 class fMRICLIPAutoEncoder(nn.Module):

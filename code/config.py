@@ -166,7 +166,7 @@ class Config_MBM_finetune_cross(Config_MBM_finetune):
         # Training Parameters
         self.lr = 5.3e-5
         self.weight_decay = 0.05
-        self.num_epoch = 15
+        self.num_epoch = 500
         self.batch_size = 16 if self.dataset == 'GOD' else 4 
         self.mask_ratio = 0.75 
         self.img_mask_ratio = 0.75 

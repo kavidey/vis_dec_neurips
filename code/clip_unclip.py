@@ -1,9 +1,10 @@
 # %%
+import os
+os.environ["HF_HOME"] = "/home/users/nus/li.rl/scratch/intern_kavi/.cache/"
 import sys
 import math
 import time
 import datetime
-import os
 from omegaconf import OmegaConf
 from pathlib import Path
 import wandb
@@ -14,6 +15,8 @@ import argparse
 import torch
 from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
+from einops import rearrange, repeat
+from torchvision.utils import make_grid, save_image
 
 from dataset import create_Kamitani_dataset_distill, create_BOLD5000_dataset_classify
 from config import Config_MBM_finetune_cross, merge_needed_cross_config
@@ -78,7 +81,7 @@ if multi_gpu:
     torch.cuda.set_device(config.local_rank)
     torch.distributed.init_process_group(backend="nccl")
 
-config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
+config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
 config.clip_dim = 1024
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
@@ -106,8 +109,10 @@ if config.dataset == "GOD":
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.kam_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
 else:
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.bold5000_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
-# logger = wandb_logger(config) if config.local_rank == 0 else None
-logger = None
+
+wandb.login(key="033a657f5ef5b2c58bc50620eef125d6f7733490")
+logger = wandb_logger(config) if config.local_rank == 0 else None
+# logger = None
 
 if config.local_rank == 0:
     os.makedirs(output_path, exist_ok=True)
@@ -232,6 +237,7 @@ merged_config = merge_needed_cross_config(
 
 for ep in range(config.num_epoch):
     ckpt_file_name = f"checkpoint_singlesub_{config.wandb_name}_epo{ep}_mergconf.pth"
+    ckpt_img_file_name = f"checkpoint_singlesub_{config.wandb_name}_epo{ep}_mergconf_img.pth"
     if multi_gpu:
         sampler.set_epoch(ep)
 
@@ -328,6 +334,7 @@ for ep in range(config.num_epoch):
         total_loss_image.append(loss_img_recon.item())
         total_cor.append(cor)
         # total_cor_image.append(cor_image)
+        break
 
     if logger is not None:
         lr = optimizer.param_groups[0]["lr"]
@@ -347,6 +354,7 @@ for ep in range(config.num_epoch):
         )
 
     # EVAL
+    save_ckpt = (ep % 10 == 0 and ep != 0)
     model.eval()
     model_image.eval()
     total_loss = []
@@ -355,6 +363,8 @@ for ep in range(config.num_epoch):
     total_cor_image = []
     # total_loss_fmri = []
     accum_iter = config.accum_iter
+
+    all_samples = []
 
     for data_iter_step, (data_dcit) in enumerate(dataloader_hcp_test):
         samples = data_dcit["fmri"]
@@ -399,6 +409,10 @@ for ep in range(config.num_epoch):
             )
             sys.exit(1)
 
+        if save_ckpt:
+            generated_images = model_image.generate_image(fmri_support, steps=50)
+            all_samples.append(torch.cat([images.cpu(), generated_images.detach().cpu()], dim=0))
+
         # loss_scaler(img_recons_output.loss, optimizer, parameters=model_image.parameters(), clip_grad=config.clip_grad)
 
         # if (data_iter_step + 1) % accum_iter == 0:
@@ -436,14 +450,30 @@ for ep in range(config.num_epoch):
             f"[Epoch {ep}] test corr fmri: {np.mean(total_cor)} test corr image: {np.mean(total_cor_image)}"
         )
 
-    save_model_merge_conf(
-        config_pretrain,
-        ep,
-        model_without_ddp,
-        optimizer,
-        os.path.join(output_path, f"checkpoints_{ep}"),
-        merged_config,
-        ckpt_file_name,
-    )
+    if save_ckpt:
+        save_model_merge_conf(
+            config_pretrain,
+            ep,
+            model_without_ddp,
+            optimizer,
+            os.path.join(output_path, f"checkpoints_{ep}"),
+            merged_config,
+            ckpt_file_name,
+        )
+        torch.save(model_image.state_dict(), os.path.join(output_path, f"checkpoints_{ep}", ckpt_img_file_name))
+        
+        grid = torch.stack(all_samples[:-1], 0)
+        grid = rearrange(grid, 'n b c h w -> (n b) c h w')
+        grid = make_grid(grid, nrow=8)
+        save_image(grid, os.path.join(output_path, f"checkpoints_{ep}", "recon_image.jpg"))
 
+save_model_merge_conf(
+    config_pretrain,
+    config.num_epoch,
+    model_without_ddp,
+    optimizer,
+    os.path.join(output_path, "final"),
+    merged_config,
+    ckpt_file_name,
+)
 # %%
