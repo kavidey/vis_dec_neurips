@@ -208,6 +208,7 @@ class ConditionLDM(nn.Module):
         self.clip_model = CLIPVisionModel.from_pretrained(
             "openai/clip-vit-large-patch14"
         )
+        self.clip_model.requires_grad_(False)
         self.clip_model.to(device)
         self.clip_processor = CLIPProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"

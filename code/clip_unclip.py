@@ -17,6 +17,7 @@ from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel
 from einops import rearrange, repeat
 from torchvision.utils import make_grid, save_image
+import torchinfo
 
 from dataset import create_Kamitani_dataset_distill, create_BOLD5000_dataset_classify
 from config import Config_MBM_finetune_cross, merge_needed_cross_config
@@ -235,6 +236,12 @@ merged_config = merge_needed_cross_config(
     config_pretrain, config, model_image_config, addition_config
 )
 
+print("Model Summary")
+print(torchinfo.summary(model, depth=1), "\n\n")
+
+print("Model Image Summary")
+print(torchinfo.summary(model_image, depth=1))
+
 for ep in range(config.num_epoch):
     ckpt_file_name = f"checkpoint_singlesub_{config.wandb_name}_epo{ep}_mergconf.pth"
     ckpt_img_file_name = f"checkpoint_singlesub_{config.wandb_name}_epo{ep}_mergconf_img.pth"
@@ -411,7 +418,8 @@ for ep in range(config.num_epoch):
 
         if save_ckpt:
             generated_images = model_image.generate_image(fmri_support, steps=50)
-            all_samples.append(torch.cat([images.cpu(), generated_images.detach().cpu()], dim=0))
+            combined = torch.cat([torch.stack([a_row,b_row]) for a_row, b_row in zip(images.cpu(), generated_images.cpu())])
+            all_samples.append(combined)
 
         # loss_scaler(img_recons_output.loss, optimizer, parameters=model_image.parameters(), clip_grad=config.clip_grad)
 
@@ -451,16 +459,18 @@ for ep in range(config.num_epoch):
         )
 
     if save_ckpt:
-        save_model_merge_conf(
-            config_pretrain,
-            ep,
-            model_without_ddp,
-            optimizer,
-            os.path.join(output_path, f"checkpoints_{ep}"),
-            merged_config,
-            ckpt_file_name,
-        )
-        torch.save(model_image.state_dict(), os.path.join(output_path, f"checkpoints_{ep}", ckpt_img_file_name))
+        os.makedirs(os.path.join(output_path, f"checkpoints_{ep}"), exist_ok=True)
+        if ep % 50 == 0:
+            save_model_merge_conf(
+                config_pretrain,
+                ep,
+                model_without_ddp,
+                optimizer,
+                os.path.join(output_path, f"checkpoints_{ep}"),
+                merged_config,
+                ckpt_file_name,
+            )
+            torch.save(model_image.state_dict(), os.path.join(output_path, f"checkpoints_{ep}", ckpt_img_file_name))
         
         grid = torch.stack(all_samples[:-1], 0)
         grid = rearrange(grid, 'n b c h w -> (n b) c h w')
@@ -476,4 +486,5 @@ save_model_merge_conf(
     merged_config,
     ckpt_file_name,
 )
+torch.save(model_image.state_dict(), os.path.join(output_path, f"checkpoints_{ep}", ckpt_img_file_name))
 # %%
