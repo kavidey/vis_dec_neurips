@@ -104,9 +104,9 @@ with torch.no_grad():
     latents_scaled = latents / vae.config.scaling_factor
     image = vae.decode(latents_scaled).sample.detach()
 # image = pipe.image_processor.postprocess(image)[0]
-image
-# image = (image / 2 + 0.5).clamp(0, 1)
-# F.to_pil_image(image[0])
+# image
+image = (image / 2 + 0.5).clamp(0, 1)
+F.to_pil_image(image[0])
 # %%
 pipe(num_inference_steps=steps, prompt_embeds=condition).images[0]
 # %%
