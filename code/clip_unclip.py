@@ -459,7 +459,7 @@ for ep in range(config.num_epoch):
         )
 
     if save_ckpt:
-        os.makedirs(os.path.join(output_path, f"checkpoints_{ep}"), exist_ok=True)
+        os.makedirs(output_path, f"checkpoints_{ep}", exist_ok=True)
         if ep % 50 == 0:
             save_model_merge_conf(
                 config_pretrain,

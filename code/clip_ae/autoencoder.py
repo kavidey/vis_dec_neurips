@@ -395,7 +395,6 @@ class fMRICLIPAutoEncoder(nn.Module):
             x = self.norm(x)
             return x
         else:
-            image_support_2d = image_support.unsqueeze(1)
             # print(f"{image_support.shape=}, {image_support_2d.shape=}")
             cross_x = x.clone()
 
@@ -410,8 +409,8 @@ class fMRICLIPAutoEncoder(nn.Module):
             # print(f"{x.shape=}")
 
             # print(f"{x.shape=}, {self.unmap_dims(x).shape=}")
-            x = self.unmap_dims(x)
             latent = self.decoder(x)
+            latent = self.unmap_dims(latent)
             pred = self.decode_fmri(latent, metadata)
 
             return pred, metadata
@@ -527,8 +526,7 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         self.clip_processor = CLIPProcessor.from_pretrained(
             "openai/clip-vit-large-patch14"
         )
-        for p in self.clip_model.parameters():
-            p.requires_grad = False
+        self.clip_model.requires_grad_(False)
 
     def on_fit_start(self):
         self.ldm.cond_stage_model.to(self.device)
@@ -609,17 +607,9 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         return opt
 
     def get_clip_embeddings(self, image):
-        with torch.no_grad():
-            # print(image)
-            inputs = self.clip_processor(images=image, do_rescale=False, return_tensors="pt")
-            # print(inputs)
-            pixel_values = inputs["pixel_values"].to(self.device)
-            # print(type(pixel_values))
-            # print(pixel_values.device)
-            # # pixel_values = [ t.to(self.device) for t in pixel_values ]
-            # # print(pixel_values)
-            # # print(pixel_values[0].device)
-            clip_embeddings = self.clip_model(pixel_values).last_hidden_state
+        inputs = self.clip_processor(images=image, do_rescale=False, return_tensors="pt")
+        pixel_values = inputs["pixel_values"].to(self.device)
+        clip_embeddings = self.clip_model(pixel_values).last_hidden_state
         return clip_embeddings
 
     def apply_cross_attention(self, clip_embeddings):
