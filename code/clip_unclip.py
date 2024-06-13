@@ -84,7 +84,7 @@ if multi_gpu:
 
 # testing arguments
 config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
-config.clip_dim = 1024
+config.clip_dim = 768
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
 config.img_recon_weight = 1.5

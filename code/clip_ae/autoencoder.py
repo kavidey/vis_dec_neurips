@@ -13,7 +13,13 @@ from torchvision.utils import make_grid
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
 from transformers import CLIPProcessor, CLIPVisionModel, CLIPImageProcessor
-from diffusers import UNet2DConditionModel, PNDMScheduler, AutoencoderKL
+from diffusers import (
+    UNet2DConditionModel,
+    PNDMScheduler,
+    AutoencoderKL,
+    DDIMScheduler,
+    CLIPVisionModelWithProjection,
+)
 
 # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
 import sys
@@ -30,6 +36,7 @@ from sc_mbm.mae_for_fmri import MAEforFMRICross, PatchEmbed1D
 from sc_mbm.mae_for_image import ViTMAEConfig, ViTMAELayer
 from clip_ae.utils import unclip_recon, instantiate_from_config
 from clip_ae.conditioned_ldm import cond_stage_model
+
 # from dc_ldm.models.diffusion.plms import PLMSSampler
 
 
@@ -199,38 +206,47 @@ class unCLIP(nn.Module):
         return np.mean(corrs)
 
 
+def normalize_embeddings(encoder_output, image_encoder):
+    embeds = image_encoder.vision_model.post_layernorm(encoder_output.last_hidden_state)
+    embeds = image_encoder.visual_projection(embeds)
+    embeds_pooled = embeds[:, 0:1]
+    embeds = embeds / torch.norm(embeds_pooled, dim=-1, keepdim=True)
+    return embeds
+
+
 class ConditionLDM(nn.Module):
     def __init__(self, model_image_config, clip_dim=1024, device=torch.device("cpu")):
         super().__init__()
 
         self.device = device
 
-        self.clip_model = CLIPVisionModel.from_pretrained(
-            "openai/clip-vit-large-patch14"
+        self.diffusion_model_id = "shi-labs/versatile-diffusion"
+        self.unet = UNet2DConditionModel.from_pretrained(
+            self.diffusion_model_id, subfolder="image_unet"
         )
-        self.clip_model.requires_grad_(False)
-        self.clip_model.to(device)
-        self.clip_processor = CLIPProcessor.from_pretrained(
-            "openai/clip-vit-large-patch14"
-        )
-
-        self.clip_seq_dim = 257
-        self.clip_emb_dim = 1024
-
-        self.diffusion_model_id = "CompVis/stable-diffusion-v1-4"
-        self.unet = UNet2DConditionModel.from_pretrained(self.diffusion_model_id, subfolder="unet")
         for param in [p for n, p in self.unet.named_parameters() if "attn2" not in n]:
             param.requires_grad = False
         self.unet.train()
         self.unet.to(device)
 
-        self.feature_extractor = CLIPImageProcessor.from_pretrained(self.diffusion_model_id, subfolder="feature_extractor")
+        self.image_feature_extractor = CLIPImageProcessor.from_pretrained(
+            self.diffusion_model_id, subfolder="image_feature_extractor"
+        )
+        self.image_encoder = CLIPVisionModelWithProjection.from_pretrained(
+            self.diffusion_model_id, subfolder="image_encoder"
+        )
+        self.image_encoder.requires_grad_(False)
+        self.image_encoder.to(device)
 
-        self.vae = AutoencoderKL.from_pretrained(self.diffusion_model_id, subfolder="vae")
+        self.vae = AutoencoderKL.from_pretrained(
+            self.diffusion_model_id, subfolder="vae"
+        )
         self.vae.requires_grad_(False)
         self.vae.to(device)
 
-        self.scheduler = PNDMScheduler.from_pretrained(self.diffusion_model_id, subfolder='scheduler')
+        self.scheduler = DDIMScheduler.from_pretrained(
+            self.diffusion_model_id, subfolder="scheduler"
+        )
 
         self.cross_blocks = nn.ModuleList(
             [
@@ -240,27 +256,31 @@ class ConditionLDM(nn.Module):
         )
         for block in self.cross_blocks:
             block.cuda()
-        
+
         self.norm = nn.LayerNorm(clip_dim)
         self.norm.cuda()
 
-        self.map_dims = nn.Linear(clip_dim, 768)
-        self.map_dims.cuda()
-
     def encode_clip(self, img):
-        inputs = self.clip_processor(images=img, return_tensors="pt", do_rescale=False)
-        pixel_values = inputs["pixel_values"].to(self.device)
-        clip_embeddings = self.clip_model(pixel_values).last_hidden_state
-        return clip_embeddings
+        # inputs = self.clip_processor(images=img, return_tensors="pt", do_rescale=False)
+        # pixel_values = inputs["pixel_values"].to(self.device)
+        # clip_embeddings = self.clip_model(pixel_values).last_hidden_state
+
+        image_input = self.image_feature_extractor(img, return_tensors="pt", do_rescale=False).pixel_values
+        image_embeddings = self.image_encoder(image_input)
+        image_embeddings = normalize_embeddings(image_embeddings, self.image_encoder)
+
+        return image_embeddings
 
     def diffusion_step(self, image, condition):
-        '''
+        """
         condition needs to have shape (batch, X, 768)
-        '''
-        img = self.feature_extractor(image, do_rescale=False)
-        img = torch.vstack([torch.from_numpy(t)[None] for t in img['pixel_values']])
+        """
+        img = self.image_feature_extractor(image, do_rescale=False)
+        img = torch.vstack([torch.from_numpy(t)[None] for t in img["pixel_values"]])
         img = img.to(image.device)
-        latents = self.vae.encode(img).latent_dist.sample() * self.vae.config.scaling_factor
+        latents = (
+            self.vae.encode(img).latent_dist.sample() * self.vae.config.scaling_factor
+        )
         noise = torch.randn_like(latents)
 
         timesteps = torch.randint(
@@ -269,17 +289,14 @@ class ConditionLDM(nn.Module):
             (latents.size(0),),
             device=latents.device,
         ).long()
-
         noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
 
-        condition = self.map_dims(condition)
-
-        unet_output = self.unet(noisy_latents, timesteps, encoder_hidden_states=condition).sample
-
+        unet_output = self.unet(
+            noisy_latents, timesteps, encoder_hidden_states=condition
+        ).sample
         loss = F.mse_loss(unet_output, noise)
 
         return loss
-
 
     def forward(self, img, encoder_only=False, fmri_support=None):
         embeddings = self.encode_clip(img)
@@ -315,14 +332,15 @@ class ConditionLDM(nn.Module):
         corrs = [np.corrcoef(f_imgs[i], f_pred[i])[0][1] for i in range(len(imgs))]
 
         return np.mean(corrs)
-    
+
     @torch.no_grad()
     def generate_image(self, condition, steps):
-        condition = self.map_dims(condition)
-        
         self.scheduler.set_timesteps(steps)
         scheduler_steps = self.scheduler.timesteps
-        latents = torch.randn((condition.shape[0], 4, 64, 64), device=self.device) * self.scheduler.init_noise_sigma
+        latents = (
+            torch.randn((condition.shape[0], 4, 64, 64), device=self.device)
+            * self.scheduler.init_noise_sigma
+        )
 
         for t in scheduler_steps:
             latent_model_input = self.scheduler.scale_model_input(latents, t)
@@ -333,7 +351,7 @@ class ConditionLDM(nn.Module):
                 return_dict=False,
             )[0]
             latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
-            
+
         latents_scaled = latents / self.vae.config.scaling_factor
         image = self.vae.decode(latents_scaled).sample.detach()
 
@@ -607,7 +625,9 @@ class fMRI_CLIP_Cond_LDM(pl.LightningModule):
         return opt
 
     def get_clip_embeddings(self, image):
-        inputs = self.clip_processor(images=image, do_rescale=False, return_tensors="pt")
+        inputs = self.clip_processor(
+            images=image, do_rescale=False, return_tensors="pt"
+        )
         pixel_values = inputs["pixel_values"].to(self.device)
         clip_embeddings = self.clip_model(pixel_values).last_hidden_state
         return clip_embeddings
