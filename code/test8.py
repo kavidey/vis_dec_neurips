@@ -60,7 +60,8 @@ def normalize_embeddings(encoder_output):
     return embeds
 # %%
 with torch.no_grad():
-    image_input = image_feature_extractor(F.resize(ref_image, 256), return_tensors="pt").pixel_values
+    # image_input = image_feature_extractor(F.to_tensor(F.resize(ref_image, 256)), return_tensors="pt").pixel_values
+    image_input = image_feature_extractor(F.to_tensor(F.resize(ref_image, 256)), return_tensors="pt", do_rescale=False).pixel_values
     image_input = image_input.to(device)
     image_embeddings = image_encoder(image_input)
     image_embeddings = normalize_embeddings(image_embeddings)

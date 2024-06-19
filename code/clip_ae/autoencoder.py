@@ -12,13 +12,12 @@ import wandb
 from torchvision.utils import make_grid
 import torchvision.transforms as transforms
 from torch.utils.data import DataLoader
-from transformers import CLIPProcessor, CLIPVisionModel, CLIPImageProcessor
+from transformers import CLIPProcessor, CLIPVisionModel, CLIPImageProcessor, CLIPVisionModelWithProjection
 from diffusers import (
     UNet2DConditionModel,
     PNDMScheduler,
     AutoencoderKL,
     DDIMScheduler,
-    CLIPVisionModelWithProjection,
 )
 
 # SDXL unCLIP requires code from https://github.com/Stability-AI/generative-models/tree/main
@@ -215,10 +214,14 @@ def normalize_embeddings(encoder_output, image_encoder):
 
 
 class ConditionLDM(nn.Module):
-    def __init__(self, model_image_config, clip_dim=1024, device=torch.device("cpu")):
+    def __init__(self, model_image_config, clip_dim=1024, ca_weight=1, guidance_scale=0, device=torch.device("cpu")):
         super().__init__()
 
         self.device = device
+        self.ca_weight = ca_weight
+
+        self.guidance_scale = 0
+        self.do_unconditional_guidance = guidance_scale > 0
 
         self.diffusion_model_id = "shi-labs/versatile-diffusion"
         self.unet = UNet2DConditionModel.from_pretrained(
@@ -257,15 +260,13 @@ class ConditionLDM(nn.Module):
         for block in self.cross_blocks:
             block.cuda()
 
-        self.norm = nn.LayerNorm(clip_dim)
-        self.norm.cuda()
-
     def encode_clip(self, img):
         # inputs = self.clip_processor(images=img, return_tensors="pt", do_rescale=False)
         # pixel_values = inputs["pixel_values"].to(self.device)
         # clip_embeddings = self.clip_model(pixel_values).last_hidden_state
 
         image_input = self.image_feature_extractor(img, return_tensors="pt", do_rescale=False).pixel_values
+        image_input = image_input.to(self.device)
         image_embeddings = self.image_encoder(image_input)
         image_embeddings = normalize_embeddings(image_embeddings, self.image_encoder)
 
@@ -278,6 +279,15 @@ class ConditionLDM(nn.Module):
         img = self.image_feature_extractor(image, do_rescale=False)
         img = torch.vstack([torch.from_numpy(t)[None] for t in img["pixel_values"]])
         img = img.to(image.device)
+
+        if self.do_unconditional_guidance:
+            uncond_img = [np.zeros((512, 512, 3)) + 0.5] * image.shape[0]
+            uncond_img = self.image_feature_extractor(uncond_img, do_rescale=False)
+            uncond_img = torch.vstack([torch.from_numpy(t)[None] for t in uncond_img["pixel_values"]])
+            uncond_embeddings = self.encode_clip(uncond_img)
+
+            condition = torch.cat([uncond_embeddings, condition])
+
         latents = (
             self.vae.encode(img).latent_dist.sample() * self.vae.config.scaling_factor
         )
@@ -291,10 +301,15 @@ class ConditionLDM(nn.Module):
         ).long()
         noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
 
-        unet_output = self.unet(
+        noise_pred = self.unet(
             noisy_latents, timesteps, encoder_hidden_states=condition
         ).sample
-        loss = F.mse_loss(unet_output, noise)
+
+        if self.do_unconditional_guidance:
+            noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+            noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+
+        loss = F.mse_loss(noise_pred, noise)
 
         return loss
 
@@ -304,19 +319,20 @@ class ConditionLDM(nn.Module):
             return embeddings
         else:
             x = embeddings
-            cross_x = x.clone()
-
-            for blk in self.cross_blocks:
-                # print(cross_x.device, fmri_support.device)
-                # print(blk)
-                cross_x_full = blk(cross_x, hidden_states_mod2=fmri_support)
-                cross_x = cross_x_full[0]
-
+            cross_x = self.cross_attention(x, fmri_support)
             x = x + cross_x
 
-            x = self.norm(x)
-
             return self.diffusion_step(img, x)
+    
+    def cross_attention(self, embeddings, fmri_support):
+        cross_x = embeddings.clone()
+
+        for blk in self.cross_blocks:
+            cross_x_full = blk(cross_x, hidden_states_mod2=fmri_support)
+            cross_x = cross_x_full[0]
+
+        return cross_x * self.ca_weight
+        
 
     def recon_loss(self, imgs, pred):
         """
@@ -334,11 +350,24 @@ class ConditionLDM(nn.Module):
         return np.mean(corrs)
 
     @torch.no_grad()
-    def generate_image(self, condition, steps):
+    def generate_image(self, image, fmri_support, steps):
+        embeddings = self.encode_clip(image)
+        x = embeddings
+        cross_x = self.cross_attention(x, fmri_support)
+        x = x + cross_x
+
+        if self.do_unconditional_guidance:
+            uncond_img = [np.zeros((512, 512, 3)) + 0.5] * x.shape[0]
+            uncond_img = self.image_feature_extractor(uncond_img, do_rescale=False)
+            uncond_img = torch.vstack([torch.from_numpy(t)[None] for t in uncond_img["pixel_values"]])
+            uncond_embeddings = self.encode_clip(uncond_img)
+
+            x = torch.cat([uncond_embeddings, x])
+
         self.scheduler.set_timesteps(steps)
         scheduler_steps = self.scheduler.timesteps
         latents = (
-            torch.randn((condition.shape[0], 4, 64, 64), device=self.device)
+            torch.randn((x.shape[0], 4, 64, 64), device=self.device)
             * self.scheduler.init_noise_sigma
         )
 
@@ -347,9 +376,14 @@ class ConditionLDM(nn.Module):
             noise_pred = self.unet(
                 latent_model_input,
                 t,
-                encoder_hidden_states=condition,
+                encoder_hidden_states=x,
                 return_dict=False,
             )[0]
+
+            if self.do_unconditional_guidance:
+                noise_pred_uncond, noise_pred_text = noise_pred.chunk(2)
+                noise_pred = noise_pred_uncond + self.guidance_scale * (noise_pred_text - noise_pred_uncond)
+        
             latents = self.scheduler.step(noise_pred, t, latents, return_dict=False)[0]
 
         latents_scaled = latents / self.vae.config.scaling_factor
