@@ -93,8 +93,8 @@ config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
 config.dataset = "GOD"
 config.batch_size = 4
-config.img_ca_weight = 0.01
-config.guidance_scale = 4
+config.img_ca_weight = 1
+config.guidance_scale = 1
 
 sd = torch.load(config.pretrain_mbm_path, map_location="cpu")
 config_pretrain = sd["config"]

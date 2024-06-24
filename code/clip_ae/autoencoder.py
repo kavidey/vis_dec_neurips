@@ -258,7 +258,10 @@ class ConditionLDM(nn.Module):
             ]
         )
         for block in self.cross_blocks:
-            block.cuda()
+            block.to(device)
+
+        self.norm = nn.LayerNorm(clip_dim)
+        self.norm.to(device)
 
     def encode_clip(self, img):
         # inputs = self.clip_processor(images=img, return_tensors="pt", do_rescale=False)
@@ -337,6 +340,8 @@ class ConditionLDM(nn.Module):
         for blk in self.cross_blocks:
             cross_x_full = blk(cross_x, hidden_states_mod2=fmri_support)
             cross_x = cross_x_full[0]
+        
+        cross_x = self.norm(cross_x)
 
         return cross_x * self.ca_weight
         
