@@ -408,12 +408,10 @@ class fMRICLIPAutoEncoder(nn.Module):
             config, sd, config_pretrain, model_image_config, clip_dim, device
         )
 
-        # Freeze Model so we're only learning linear layers
-        for param in self.mae.parameters():
-            param.requires_grad = False
+        # Freeze model so we're only learning linear layers
+        # for param in self.mae.parameters():
+        #     param.requires_grad = False
 
-        self.map_dims = nn.Conv1d(73, 257, 1)
-        self.unmap_dims = nn.ConvTranspose1d(257, 73, 1)
         self.encoder = nn.Linear(config_pretrain.embed_dim, clip_dim)
         self.decoder = nn.Linear(clip_dim, config_pretrain.embed_dim)
         self.cross_blocks = nn.ModuleList(
@@ -440,7 +438,7 @@ class fMRICLIPAutoEncoder(nn.Module):
         latent, metadata = self.encode_fmri(sample, mask_ratio=self.config.mask_ratio)
         # print(latent.shape, self.map_dims(latent).shape)
         # print(f"{latent.shape=}")
-        latent = self.map_dims(latent)
+
         x = self.encoder(latent)
         # print(f"{x.shape=}")
         if encoder_only:
@@ -462,7 +460,6 @@ class fMRICLIPAutoEncoder(nn.Module):
 
             # print(f"{x.shape=}, {self.unmap_dims(x).shape=}")
             latent = self.decoder(x)
-            latent = self.unmap_dims(latent)
             pred = self.decode_fmri(latent, metadata)
 
             return pred, metadata
