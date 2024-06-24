@@ -221,7 +221,7 @@ class ConditionLDM(nn.Module):
         self.ca_weight = ca_weight
 
         self.guidance_scale = 0
-        self.do_unconditional_guidance = guidance_scale > 0
+        self.do_unconditional_guidance = guidance_scale != 1
 
         self.diffusion_model_id = "shi-labs/versatile-diffusion"
         self.unet = UNet2DConditionModel.from_pretrained(
@@ -280,14 +280,6 @@ class ConditionLDM(nn.Module):
         img = torch.vstack([torch.from_numpy(t)[None] for t in img["pixel_values"]])
         img = img.to(image.device)
 
-        if self.do_unconditional_guidance:
-            uncond_img = [np.zeros((512, 512, 3)) + 0.5] * image.shape[0]
-            uncond_img = self.image_feature_extractor(uncond_img, do_rescale=False)
-            uncond_img = torch.vstack([torch.from_numpy(t)[None] for t in uncond_img["pixel_values"]])
-            uncond_embeddings = self.encode_clip(uncond_img)
-
-            condition = torch.cat([uncond_embeddings, condition])
-
         latents = (
             self.vae.encode(img).latent_dist.sample() * self.vae.config.scaling_factor
         )
@@ -299,7 +291,22 @@ class ConditionLDM(nn.Module):
             (latents.size(0),),
             device=latents.device,
         ).long()
-        noisy_latents = self.scheduler.add_noise(latents, noise, timesteps)
+
+        if self.do_unconditional_guidance:
+            uncond_img = [np.zeros((512, 512, 3)) + 0.5] * image.shape[0]
+            uncond_img = self.image_feature_extractor(uncond_img, do_rescale=False)
+            uncond_img = torch.vstack([torch.from_numpy(t)[None] for t in uncond_img["pixel_values"]])
+            uncond_embeddings = self.encode_clip(uncond_img)
+
+            condition = torch.cat([uncond_embeddings, condition])
+            latent_model_inputs = torch.cat([latents]*2)
+            noise_inputs = torch.cat([noise]*2)
+            timesteps = torch.cat([timesteps]*2)
+        else:
+            latent_model_inputs = latents
+            noise_inputs = noise
+
+        noisy_latents = self.scheduler.add_noise(latent_model_inputs, noise_inputs, timesteps)
 
         noise_pred = self.unet(
             noisy_latents, timesteps, encoder_hidden_states=condition
@@ -356,6 +363,11 @@ class ConditionLDM(nn.Module):
         cross_x = self.cross_attention(x, fmri_support)
         x = x + cross_x
 
+        latents = (
+            torch.randn((x.shape[0], 4, 64, 64), device=self.device)
+            * self.scheduler.init_noise_sigma
+        )
+
         if self.do_unconditional_guidance:
             uncond_img = [np.zeros((512, 512, 3)) + 0.5] * x.shape[0]
             uncond_img = self.image_feature_extractor(uncond_img, do_rescale=False)
@@ -366,13 +378,10 @@ class ConditionLDM(nn.Module):
 
         self.scheduler.set_timesteps(steps)
         scheduler_steps = self.scheduler.timesteps
-        latents = (
-            torch.randn((x.shape[0], 4, 64, 64), device=self.device)
-            * self.scheduler.init_noise_sigma
-        )
-
+        
         for t in scheduler_steps:
-            latent_model_input = self.scheduler.scale_model_input(latents, t)
+            latent_model_input = torch.cat([latents] * 2) if self.do_unconditional_guidance else latents
+            latent_model_input = self.scheduler.scale_model_input(latent_model_input, t)
             noise_pred = self.unet(
                 latent_model_input,
                 t,
