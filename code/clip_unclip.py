@@ -93,6 +93,8 @@ config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
 config.dataset = "GOD"
 config.batch_size = 4
+config.img_ca_weight = 0.01
+config.guidance_scale = 4
 
 sd = torch.load(config.pretrain_mbm_path, map_location="cpu")
 config_pretrain = sd["config"]
@@ -143,7 +145,7 @@ model.to(device)
 num_voxels = model.num_voxels
 model_without_ddp = model
 
-model_image = ConditionLDM(model_image_config, config.clip_dim, device=device)
+model_image = ConditionLDM(model_image_config, config.clip_dim, config.img_ca_weight, config.guidance_scale, device=device)
 # model_image.to(device)
 
 if multi_gpu:
@@ -269,7 +271,7 @@ for ep in range(config.num_epoch):
         images = images.permute(0, 3, 1, 2).float()
         images = images.to(device)
 
-        valid_idx = torch.nonzero(images.sum(dim=(1, 2, 3)) != 0).squeeze(1)
+        image_class = data_dcit["image_class"].to(device)
 
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(enabled=True):
@@ -418,7 +420,7 @@ for ep in range(config.num_epoch):
             sys.exit(1)
 
         if save_ckpt:
-            generated_images = model_image.generate_image(fmri_support, steps=50)
+            generated_images = model_image.generate_image(images, fmri_support, steps=50)
             combined = torch.cat([torch.stack([a_row,b_row]) for a_row, b_row in zip(images.cpu(), generated_images.cpu())])
             all_samples.append(combined)
 
@@ -461,7 +463,7 @@ for ep in range(config.num_epoch):
 
     if save_ckpt:
         os.makedirs(os.path.join(output_path, f"checkpoints_{ep}"), exist_ok=True)
-        if ep % 50 == 0:
+        if ep % 100 == 0:
             save_model_merge_conf(
                 config_pretrain,
                 ep,
