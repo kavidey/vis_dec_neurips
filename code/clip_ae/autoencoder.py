@@ -365,8 +365,8 @@ class ConditionLDM(nn.Module):
     def generate_image(self, image, fmri_support, steps):
         embeddings = self.encode_clip(image)
         x = embeddings
-        cross_x = self.cross_attention(x, fmri_support)
-        x = x + cross_x
+        # cross_x = self.cross_attention(x, fmri_support)
+        # x = x + cross_x
 
         latents = (
             torch.randn((x.shape[0], 4, 64, 64), device=self.device)

@@ -221,9 +221,9 @@ test_sampler = (
     if multi_gpu
     else torch.utils.data.RandomSampler(test_set)
 )
-test_sampler = torch.utils.data.RandomSampler(test_set)
+# test_sampler = torch.utils.data.RandomSampler(test_set)
 dataloader_hcp_test = DataLoader(
-    test_set, batch_size=config.batch_size, sampler=test_sampler
+    test_set, batch_size=config.batch_size
 )
 # %%
 start_time = time.time()
