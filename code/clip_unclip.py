@@ -84,6 +84,7 @@ if multi_gpu:
 
 # testing arguments
 config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
+# config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
 config.clip_dim = 768
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
@@ -221,9 +222,9 @@ test_sampler = (
     if multi_gpu
     else torch.utils.data.RandomSampler(test_set)
 )
-test_sampler = torch.utils.data.RandomSampler(test_set)
+# test_sampler = torch.utils.data.RandomSampler(test_set)
 dataloader_hcp_test = DataLoader(
-    test_set, batch_size=config.batch_size, sampler=test_sampler
+    test_set, batch_size=config.batch_size
 )
 # %%
 start_time = time.time()
@@ -489,5 +490,5 @@ save_model_merge_conf(
     merged_config,
     ckpt_file_name,
 )
-torch.save(model_image.state_dict(), os.path.join(output_path, f"checkpoints_{ep}", ckpt_img_file_name))
+torch.save(model_image.state_dict(), os.path.join(output_path, "final", ckpt_img_file_name))
 # %%
