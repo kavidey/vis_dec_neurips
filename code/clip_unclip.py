@@ -115,8 +115,8 @@ else:
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.bold5000_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
 
 wandb.login(key="033a657f5ef5b2c58bc50620eef125d6f7733490")
-# logger = wandb_logger(config) if config.local_rank == 0 else None
-logger = None
+logger = wandb_logger(config) if config.local_rank == 0 else None
+# logger = None
 
 if config.local_rank == 0:
     os.makedirs(output_path, exist_ok=True)
@@ -304,7 +304,7 @@ for ep in range(config.num_epoch):
             # torch.Size([4, 197, 768]) torch.Size([4, 292, 1024])
 
             loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
-
+            
         loss = (
             config.fmri_recon_weight * loss_fmri_recon
             + config.img_recon_weight * loss_img_recon

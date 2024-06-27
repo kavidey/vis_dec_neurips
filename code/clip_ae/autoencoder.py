@@ -260,7 +260,8 @@ class ConditionLDM(nn.Module):
         for block in self.cross_blocks:
             block.to(device)
 
-        self.norm = nn.LayerNorm(clip_dim)
+        #self.norm = nn.LayerNorm(clip_dim)
+        self.norm = nn.Softmax(dim=2)
         self.norm.to(device)
 
     def encode_clip(self, img):

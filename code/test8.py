@@ -96,5 +96,5 @@ with torch.no_grad():
 # %%
 image = vae.decode(latents / vae.config.scaling_factor, return_dict=False)[0]
 image = (image / 2 + 0.5).clamp(0, 1)
-F.to_pil_image(image[0])
+F.to_pil_image(image[0]).save("test.jpg")
 # %%
