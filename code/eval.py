@@ -36,8 +36,8 @@ from sc_mbm.mae_for_image import ViTMAEConfig, ViTMAELayer
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ["WANDB_DIR"] = "."
 # %%
-model_ckpt_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/code/results/fmri_finetune_GOD_sbj_1/26-06-2024-12-38-22/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
-model_image_ckpt_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/code/results/fmri_finetune_GOD_sbj_1/26-06-2024-14-27-48/checkpoints_0/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo0_mergconf_img.pth"
+model_ckpt_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/code/results/fmri_finetune_GOD_sbj_1/27-06-2024-09-50-45/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
+model_image_ckpt_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/code/results/fmri_finetune_GOD_sbj_1/27-06-2024-09-50-45/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf_img.pth"
 # %%
 config = Config_MBM_finetune_cross()
 # testing arguments
@@ -85,7 +85,7 @@ model_image = ConditionLDM(
     config.guidance_scale,
     device=device,
 )
-model_image.load_state_dict(torch.load(model_image_ckpt_path), strict=False)
+model_image.load_state_dict(torch.load(model_image_ckpt_path))
 model_image.eval()
 model_image.to(device)
 # %% Setup Datasets
@@ -150,6 +150,8 @@ for data_dcit in dataloader_hcp_test:
         # clip_cls = clip_cls.div(torch.norm(clip_cls, p=2, dim=1, keepdim=True))
 
         fmri_embeddings = model(samples, encoder_only=True)
+        # fmri_embeddings = model_image.encode_clip(images) + model_image.cross_attention(model_image.encode_clip(images), fmri_embeddings)
+        # fmri_embeddings = model_image.cross_attention(model_image.encode_clip(images), fmri_embeddings)
         fmri_cls = fmri_embeddings[:, 0]
         # fmri_cls = fmri_cls.div(torch.norm(fmri_cls, p=2, dim=1, keepdim=True))
 
@@ -170,9 +172,13 @@ fc_cossim = torch.tensor(cosine_similarity(all_fmri_embeddings, all_clip_embeddi
 
 labels = torch.arange(len(all_clip_embeddings))
 # clip retrieval from fmri
-cf_retrieval = torch.sum(torch.argsort(cf_cossim,axis=1)[:,-1] == labels)/len(labels)
+cf_retrieval = torch.sum(torch.argsort(cf_cossim, axis=1)[:, -1] == labels) / len(
+    labels
+)
 # fmri retrieval from clip
-fc_retrieval = torch.sum(torch.argsort(fc_cossim,axis=1)[:,-1] == labels)/len(labels)
+fc_retrieval = torch.sum(torch.argsort(fc_cossim, axis=1)[:, -1] == labels) / len(
+    labels
+)
 
 print(f"CLIP retrieval from fMRI: {cf_retrieval:.2%}")
 print(f"fMRI retrieval from CLIP: {fc_retrieval:.2%}")
