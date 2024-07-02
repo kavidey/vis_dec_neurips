@@ -125,12 +125,14 @@ class Config_MBM_finetune(Config_MBM_finetune):
         self.output_path = self.root_path
         self.kam_path = os.path.join(self.root_path, 'data/Kamitani/npz')
         self.bold5000_path = os.path.join(self.root_path, 'data/BOLD5000')
+        self.nsd_path = os.path.join(self.root_path, 'data/nsd')
         self.dataset = 'GOD' # GOD  or BOLD5000
         self.pretrain_mbm_path = os.path.join(self.root_path, f'pretrains/{self.dataset}/fmri_encoder.pth') 
 
         self.include_nonavg_test = True
         self.kam_subs = ['sbj_3']
         self.bold5000_subs = ['CSI4']
+        self.nsd_subs = [1]
 
         # Training Parameters
         self.lr = 5.3e-5

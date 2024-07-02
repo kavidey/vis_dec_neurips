@@ -19,6 +19,7 @@ from einops import rearrange, repeat
 from torchvision.utils import make_grid, save_image
 import torchinfo
 
+from nsd_dataset import create_NSD_dataset
 from dataset import create_Kamitani_dataset_distill, create_BOLD5000_dataset_classify
 from config import Config_MBM_finetune_cross, merge_needed_cross_config
 from clip_ae.utils import (
@@ -92,7 +93,7 @@ config.img_recon_weight = 1.5
 config.img_mask_ratio = 0.5
 config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
-config.dataset = "GOD"
+config.dataset = "NSD"
 config.batch_size = 4
 config.img_ca_weight = 1
 config.guidance_scale = 1
@@ -101,7 +102,12 @@ sd = torch.load(config.pretrain_mbm_path, map_location="cpu")
 config_pretrain = sd["config"]
 
 # Setup logging
-output_sub = config.bold5000_subs if config.dataset == "BOLD5000" else config.kam_subs
+if config.dataset == "BOLD5000":
+    output_sub = config.bold5000_subs
+elif config.dataset == "NSD":
+    output_sub = config.nsd_subs
+else:
+    output_sub = config.kam_subs
 output_path = os.path.join(
     config.output_path,
     "results",
@@ -112,6 +118,8 @@ output_path = os.path.join(
 config.output_path = output_path
 if config.dataset == "GOD":
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.kam_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
+elif config.dataset == "NSD":
+    config.wandb_name = f"clip_cross_att_{config.dataset}_{config.nsd_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
 else:
     config.wandb_name = f"clip_cross_att_{config.dataset}_{config.bold5000_subs}_fmriw{config.fmri_recon_weight}_imgw{config.img_recon_weight}_fmar{config.mask_ratio}_imar{config.img_mask_ratio}_fmridl{config.fmri_decoder_layers}_imgdl{config.img_decoder_layers}_pretr{config.load_pretrain_state}_with_{config.pretrain_mbm_path.split('/')[-1]}"
 
@@ -191,6 +199,14 @@ elif config.dataset == "BOLD5000":
         fmri_transform=torch.FloatTensor,
         subjects=config.bold5000_subs,
         include_nonavg_test=config.include_nonavg_test,
+    )
+elif config.dataset == "NSD":
+    train_set, test_set = create_NSD_dataset(
+        config.nsd_path,
+        patch_size=config_pretrain.patch_size,
+        fmri_transform=torch.FloatTensor,
+        subjects=config.nsd_subs,
+        include_non_avg_test=config.include_nonavg_test
     )
 else:
     raise NotImplementedError

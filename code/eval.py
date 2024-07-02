@@ -22,6 +22,7 @@ from torchvision.utils import make_grid, save_image
 import torchinfo
 
 from dataset import create_Kamitani_dataset_distill, create_BOLD5000_dataset_classify
+from nsd_dataset import create_NSD_dataset
 from config import Config_MBM_finetune_cross, merge_needed_cross_config
 from clip_ae.utils import (
     update_config,
@@ -108,6 +109,14 @@ elif config.dataset == "BOLD5000":
         fmri_transform=torch.FloatTensor,
         subjects=config.bold5000_subs,
         include_nonavg_test=config.include_nonavg_test,
+    )
+elif config.dataset == "NSD":
+    train_set, test_set = create_NSD_dataset(
+        config.nsd_path,
+        patch_size=config_pretrain.patch_size,
+        fmri_transform=torch.FloatTensor,
+        subjects=config.nsd_subs,
+        include_non_avg_test=config.include_nonavg_test
     )
 else:
     raise NotImplementedError
