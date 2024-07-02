@@ -1,7 +1,7 @@
 # %% IMPORTS
 import os
 
-# os.environ["HF_HOME"] = "/home/users/nus/li.rl/scratch/intern_kavi/.cache/"
+# os.environ["HF_HOME"] = ".cache/"
 import sys
 import math
 import time
@@ -38,13 +38,13 @@ from transformers.models.clip.modeling_clip import clip_loss
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ["WANDB_DIR"] = "."
 # %%
-model_ckpt_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/code/results/fmri_finetune_GOD_sbj_1/27-06-2024-09-50-45/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
-model_image_ckpt_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/code/results/fmri_finetune_GOD_sbj_1/27-06-2024-09-50-45/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf_img.pth"
+model_ckpt_path = "results/fmri_finetune_GOD_sbj_1/27-06-2024-09-50-45/checkpoints_300/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo300_mergconf.pth"
+model_image_ckpt_path = "results/fmri_finetune_GOD_sbj_1/27-06-2024-09-50-45/checkpoints_300/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo300_mergconf_img.pth"
 # %%
 config = Config_MBM_finetune_cross()
 # testing arguments
 # config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
-config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
+config.pretrain_mbm_path = "../checkpoints/checkpoints_pre_140_doublecontra.pth"
 config.clip_dim = 768
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
