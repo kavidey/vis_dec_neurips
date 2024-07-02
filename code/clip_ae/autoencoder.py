@@ -227,9 +227,10 @@ class ConditionLDM(nn.Module):
         self.unet = UNet2DConditionModel.from_pretrained(
             self.diffusion_model_id, subfolder="image_unet"
         )
-        for param in [p for n, p in self.unet.named_parameters() if "attn2" not in n]:
-            param.requires_grad = False
-        self.unet.train()
+        # for param in [p for n, p in self.unet.named_parameters() if "attn2" not in n]:
+        #     param.requires_grad = False
+        # self.unet.train()
+        self.unet.requires_grad_(False)
         self.unet.to(device)
 
         self.image_feature_extractor = CLIPImageProcessor.from_pretrained(
@@ -330,7 +331,8 @@ class ConditionLDM(nn.Module):
         else:
             x = embeddings
             cross_x = self.cross_attention(x, fmri_support)
-            x = x + cross_x
+            # x = x + cross_x
+            x = cross_x
 
             return self.diffusion_step(img, x)
     
@@ -365,8 +367,9 @@ class ConditionLDM(nn.Module):
     def generate_image(self, image, fmri_support, steps):
         embeddings = self.encode_clip(image)
         x = embeddings
-        # cross_x = self.cross_attention(x, fmri_support)
+        cross_x = self.cross_attention(x, fmri_support)
         # x = x + cross_x
+        x = cross_x
 
         latents = (
             torch.randn((x.shape[0], 4, 64, 64), device=self.device)
@@ -467,7 +470,8 @@ class fMRICLIPAutoEncoder(nn.Module):
                 cross_x_full = blk(cross_x, hidden_states_mod2=image_support)
                 cross_x = cross_x_full[0]
 
-            x = x + cross_x
+            # x = x + cross_x
+            x = cross_x
 
             x = self.norm(x)
             # print(f"{x.shape=}")

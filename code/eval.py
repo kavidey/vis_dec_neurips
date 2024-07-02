@@ -32,6 +32,8 @@ from clip_ae.utils import (
 )
 from clip_ae.autoencoder import fMRICLIPAutoEncoder, ConditionLDM
 from sc_mbm.mae_for_image import ViTMAEConfig, ViTMAELayer
+import torchvision.transforms.functional as F
+from transformers.models.clip.modeling_clip import clip_loss
 
 os.environ["WANDB_START_METHOD"] = "thread"
 os.environ["WANDB_DIR"] = "."
@@ -150,7 +152,7 @@ for data_dcit in dataloader_hcp_test:
         # clip_cls = clip_cls.div(torch.norm(clip_cls, p=2, dim=1, keepdim=True))
 
         fmri_embeddings = model(samples, encoder_only=True)
-        # fmri_embeddings = model_image.encode_clip(images) + model_image.cross_attention(model_image.encode_clip(images), fmri_embeddings)
+        fmri_embeddings = model_image.encode_clip(images) + model_image.cross_attention(model_image.encode_clip(images), fmri_embeddings)
         # fmri_embeddings = model_image.cross_attention(model_image.encode_clip(images), fmri_embeddings)
         fmri_cls = fmri_embeddings[:, 0]
         # fmri_cls = fmri_cls.div(torch.norm(fmri_cls, p=2, dim=1, keepdim=True))
@@ -160,6 +162,12 @@ for data_dcit in dataloader_hcp_test:
 
 all_clip_embeddings = torch.vstack(all_clip_embeddings)
 all_fmri_embeddings = torch.vstack(all_fmri_embeddings)
+# %%
+# model.ca_weight = 1
+# generated = model_image.generate_image(images, fmri_embeddings, 50)
+# F.to_pil_image(torch.cat([*generated], dim=2))
+# %%
+# F.to_pil_image(torch.cat([*images], dim=2))
 # %%
 clip_scores = torch.nn.functional.cosine_similarity(
     all_clip_embeddings, all_fmri_embeddings, dim=1
@@ -182,4 +190,33 @@ fc_retrieval = torch.sum(torch.argsort(fc_cossim, axis=1)[:, -1] == labels) / le
 
 print(f"CLIP retrieval from fMRI: {cf_retrieval:.2%}")
 print(f"fMRI retrieval from CLIP: {fc_retrieval:.2%}")
+# %%
+# logit_scale = model_image.image_encoder.logit_scale.exp()
+logit_scale = torch.tensor(2.6592).exp()
+logits_per_text = torch.matmul(all_clip_embeddings.float(), all_fmri_embeddings.t()) * logit_scale
+logits_per_image = logits_per_text.t()
+clip_loss(logits_per_text)
+# %%
+img_support = model_image(
+    images,
+    encoder_only=True,
+)
+
+latent, metadata = model.encode_fmri(samples, mask_ratio=model.config.mask_ratio)
+x = model.encoder(latent)
+cross_x = x.clone()
+for blk in model.cross_blocks:
+    # print(f"{cross_x.shape=}")
+    cross_x_full = blk(cross_x, hidden_states_mod2=img_support)
+    cross_x = cross_x_full[0]
+
+# x = x + cross_x
+# x = cross_x
+
+x = model.norm(x)
+
+latent = model.decoder(x)
+pred = model.decode_fmri(latent, metadata)
+
+model.recon_loss(samples, pred, metadata[0])
 # %%
