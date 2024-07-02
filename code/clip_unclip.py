@@ -93,9 +93,12 @@ config.img_recon_weight = 1.5
 config.img_mask_ratio = 0.5
 config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
-config.dataset = "NSD"
+config.dataset = "GOD"
 config.batch_size = 4
 config.img_ca_weight = 1
+config.img_skip_weight = 1
+config.fmri_ca_weight = 1
+config.fmri_skip_weight = 1
 config.guidance_scale = 1
 
 sd = torch.load(config.pretrain_mbm_path, map_location="cpu")
@@ -149,12 +152,12 @@ model_image_config.hidden_size = config.clip_dim
 model_image_config.num_attention_heads = 16
 # print(model_image_config)
 
-model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, device=device)
+model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, ca_weight=config.fmri_ca_weight, skip_weight=config.fmri_skip_weight, device=device)
 model.to(device)
 num_voxels = model.num_voxels
 model_without_ddp = model
 
-model_image = ConditionLDM(model_image_config, config.clip_dim, config.img_ca_weight, config.guidance_scale, device=device)
+model_image = ConditionLDM(model_image_config, config.clip_dim, ca_weight=config.img_ca_weight, skip_weight=config.img_skip_weight, guidance_scale=config.guidance_scale, device=device)
 # model_image.to(device)
 
 if multi_gpu:

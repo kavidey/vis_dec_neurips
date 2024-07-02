@@ -67,11 +67,12 @@ def normalize_embeddings(encoder_output, image_encoder):
     return embeds
 
 class ConditionLDM(nn.Module):
-    def __init__(self, model_image_config, clip_dim=1024, ca_weight=1, guidance_scale=0, device=torch.device("cpu")):
+    def __init__(self, model_image_config, clip_dim=1024, ca_weight=1, guidance_scale=0, skip_weight=1, device=torch.device("cpu")):
         super().__init__()
 
         self.device = device
         self.ca_weight = ca_weight
+        self.skip_weight = skip_weight
 
         self.guidance_scale = 0
         self.do_unconditional_guidance = guidance_scale != 1
@@ -184,8 +185,7 @@ class ConditionLDM(nn.Module):
         else:
             x = embeddings
             cross_x = self.cross_attention(x, fmri_support)
-            # x = x + cross_x
-            x = cross_x
+            x = x * self.skip_weight + cross_x * self.ca_weight
 
             return self.diffusion_step(img, x)
     
@@ -198,7 +198,7 @@ class ConditionLDM(nn.Module):
         
         cross_x = self.norm(cross_x)
 
-        return cross_x * self.ca_weight
+        return cross_x
         
 
     def recon_loss(self, imgs, pred):
@@ -221,8 +221,7 @@ class ConditionLDM(nn.Module):
         embeddings = self.encode_clip(image)
         x = embeddings
         cross_x = self.cross_attention(x, fmri_support)
-        # x = x + cross_x
-        x = cross_x
+        x = x * self.skip_weight + cross_x * self.ca_weight
 
         latents = (
             torch.randn((x.shape[0], 4, 64, 64), device=self.device)
@@ -266,7 +265,7 @@ class ConditionLDM(nn.Module):
 
 class fMRICLIPAutoEncoder(nn.Module):
     def __init__(
-        self, config, model_image_config, clip_dim=1024, device=torch.device("cpu")
+        self, config, model_image_config, clip_dim=1024, ca_weight=1, skip_weight=1, device=torch.device("cpu")
     ):
         super().__init__()
 
@@ -277,6 +276,9 @@ class fMRICLIPAutoEncoder(nn.Module):
         self.mae, self.num_voxels, self.patch_embed = create_fmri_mae(
             config, sd, config_pretrain, model_image_config, clip_dim, device
         )
+
+        self.ca_weight = ca_weight
+        self.skip_weight = skip_weight
 
         # Freeze model so we're only learning linear layers
         # for param in self.mae.parameters():
@@ -323,8 +325,7 @@ class fMRICLIPAutoEncoder(nn.Module):
                 cross_x_full = blk(cross_x, hidden_states_mod2=image_support)
                 cross_x = cross_x_full[0]
 
-            # x = x + cross_x
-            x = cross_x
+            x = x*self.skip_weight + cross_x*self.ca_weight
 
             x = self.norm(x)
             # print(f"{x.shape=}")

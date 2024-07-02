@@ -9,3 +9,4 @@ __pycache__
 models/ldm/cin256/model.ckpt
 code/data
 lightning_logs
+.cache
