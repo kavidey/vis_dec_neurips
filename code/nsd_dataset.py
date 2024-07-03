@@ -265,9 +265,9 @@ if __name__ == "__main__":
         plt.plot(voxel.T)
         break
 # %%
-train_set, test_set = create_NSD_dataset(
-    "/home/internkavi/kavi_tmp/datasets/nsd-mind-eye",
-    subjects=[1],
-    batch_size=4
-)
+# train_set, test_set = create_NSD_dataset(
+#     "/home/internkavi/kavi_tmp/datasets/nsd-mind-eye",
+#     subjects=[1],
+#     batch_size=4
+# )
 # %%

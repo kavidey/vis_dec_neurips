@@ -86,6 +86,8 @@ if multi_gpu:
 # testing arguments
 config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
 # config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
+config.finetune_path = None
+config.finetune_path = "results/fmri_finetune_GOD_sbj_1/02-07-2024-14-54-02/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
 config.clip_dim = 768
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
@@ -96,7 +98,7 @@ config.mask_ratio = 0.75
 config.dataset = "GOD"
 config.batch_size = 4
 config.img_ca_weight = 1
-config.img_skip_weight = 1
+config.img_skip_weight = 0
 config.fmri_ca_weight = 1
 config.fmri_skip_weight = 1
 config.guidance_scale = 1
@@ -153,6 +155,8 @@ model_image_config.num_attention_heads = 16
 # print(model_image_config)
 
 model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, ca_weight=config.fmri_ca_weight, skip_weight=config.fmri_skip_weight, device=device)
+if config.finetune_path:
+    model.load_state_dict(torch.load(config.finetune_path)["model"])
 model.to(device)
 num_voxels = model.num_voxels
 model_without_ddp = model
