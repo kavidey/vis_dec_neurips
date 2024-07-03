@@ -234,6 +234,7 @@ class NSD_dataset(Dataset):
 
         img = self.images[int(behav[0, 0])].float()
         fmri = self.fmri[int(behav[0, 5])].float()
+        fmri = fmri.unsqueeze(0)
 
         return {
             "fmri": self.fmri_transform(fmri),
