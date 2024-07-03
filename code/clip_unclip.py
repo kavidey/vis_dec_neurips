@@ -87,7 +87,7 @@ if multi_gpu:
 config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
 # config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
 config.finetune_path = None
-config.finetune_path = "results/fmri_finetune_GOD_sbj_1/02-07-2024-14-54-02/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
+# config.finetune_path = "results/fmri_finetune_GOD_sbj_1/02-07-2024-14-54-02/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
 config.clip_dim = 768
 config.fmri_decoder_layers = 6
 config.img_decoder_layers = 6
@@ -98,7 +98,7 @@ config.mask_ratio = 0.75
 config.dataset = "GOD"
 config.batch_size = 4
 config.img_ca_weight = 1
-config.img_skip_weight = 0
+config.img_skip_weight = 1
 config.fmri_ca_weight = 1
 config.fmri_skip_weight = 1
 config.guidance_scale = 1
@@ -234,7 +234,7 @@ else:
     test_set.fmri = test_set.fmri[:, :num_voxels]
 
 print(f"Dataset size: {len(train_set)}, {len(test_set)}")
-if config.dataset != "NSD"
+if config.dataset != "NSD":
     sampler = (
         torch.utils.data.DistributedSampler(train_set)
         if multi_gpu
@@ -246,7 +246,7 @@ if config.dataset != "NSD"
         if multi_gpu
         else torch.utils.data.RandomSampler(test_set)
     )
-    dataloader_hcp_test = DataLoader(test_set, batch_size=config.batch_size)
+    dataloader_hcp_test = DataLoader(test_set, batch_size=config.batch_size, drop_last=True)
 else:
     sampler = (
         torch.utils.data.DistributedSampler(train_set.meta)
@@ -259,7 +259,7 @@ else:
         if multi_gpu
         else torch.utils.data.RandomSampler(train_set.meta)
     )
-    dataloader_hcp_test = DataLoader(test_set.meta, batch_size=config.batch_size)
+    dataloader_hcp_test = DataLoader(test_set.meta, batch_size=config.batch_size, drop_last=True)
 # %%
 start_time = time.time()
 
@@ -381,6 +381,9 @@ for ep in range(config.num_epoch):
         total_cor.append(cor)
         # total_cor_image.append(cor_image)
 
+        if data_iter_step > 100:
+            break
+
         if config.dataset == "NSD":
             print(data_iter_step, train_set.num_items)
             if data_iter_step >= train_set.num_items:
@@ -404,7 +407,7 @@ for ep in range(config.num_epoch):
         )
 
     # EVAL
-    save_ckpt = (ep % 10 == 0 and ep != 0)
+    save_ckpt = (ep % 1 == 0 and ep != 0)
     model.eval()
     model_image.eval()
     total_loss = []
@@ -465,7 +468,7 @@ for ep in range(config.num_epoch):
             )
             sys.exit(1)
 
-        if save_ckpt and len(all_samples < 4):
+        if save_ckpt and len(all_samples) == 0:
             generated_images = model_image.generate_image(images, fmri_support, steps=50)
             combined = torch.cat([torch.stack([a_row,b_row]) for a_row, b_row in zip(images.cpu(), generated_images.cpu())])
             all_samples.append(combined)
@@ -515,7 +518,7 @@ for ep in range(config.num_epoch):
 
     if save_ckpt:
         os.makedirs(os.path.join(output_path, f"checkpoints_{ep}"), exist_ok=True)
-        if ep % 100 == 0:
+        if ep % 10 == 0:
             save_model_merge_conf(
                 config_pretrain,
                 ep,
@@ -527,9 +530,9 @@ for ep in range(config.num_epoch):
             )
             torch.save(model_image.state_dict(), os.path.join(output_path, f"checkpoints_{ep}", ckpt_img_file_name))
         
-        grid = torch.stack(all_samples[:-1], 0)
+        grid = torch.stack(all_samples, 0)
         grid = rearrange(grid, 'n b c h w -> (n b) c h w')
-        grid = make_grid(grid, nrow=8)
+        grid = make_grid(grid, nrow=2)
         save_image(grid, os.path.join(output_path, f"checkpoints_{ep}", "recon_image.jpg"))
 
 save_model_merge_conf(
