@@ -131,7 +131,7 @@ def create_NSD_dataset(
     betas = f["betas"][:]
     fmri_train = torch.Tensor(betas).to("cpu").to(voxel_dtype)
 
-    num_test_sessions = len(list((sub_path / "train").iterdir()))
+    num_test_sessions = len(list((sub_path / "test").iterdir()))
     meta_test = (
         wds.WebDataset(
             str(sub_path / "test" / f"{{0..{num_test_sessions-1}}}.tar"),
@@ -198,8 +198,8 @@ class NSD_dataset(Dataset):
         behav, _, _, _ = next(islice(self.metadata, index, index+1))
 
         img = self.images[int(behav[0, 0])].float()
-        fmri = self.fmri[int(behav[0, 5])]
-        fmri = torch.Tensor(fmri)
+        fmri = self.fmri[int(behav[0, 5])].float()
+        fmri = fmri.unsqueeze(0)
 
         return {
             "fmri": self.fmri_transform(fmri),
