@@ -19,6 +19,7 @@ import numpy as np
 
 import torch
 import torchvision.transforms as transforms
+import torchvision.transforms.functional as F
 from torch.utils.data import Dataset
 from torch.utils.data import DataLoader
 
@@ -185,7 +186,7 @@ def create_NSD_dataset(
 
     return (
         NSD_Dataset(meta_train, images, fmri_train, batch_size, num_voxels, (750*num_train_sessions) // batch_size),
-        NSD_Dataset(meta_test, images, fmri_test, batch_size, num_voxels, num_test),
+        NSD_Dataset(meta_test, images, fmri_test, batch_size, num_voxels, num_test // batch_size),
     )
 
 
@@ -200,14 +201,17 @@ class NSD_Dataset:
         self.num_items = num_items
 
         self.iter = 0
+    
+    def __len__(self):
+        return self.num_items * self.batch_size
 
     def get_batch(self, metadata):
         behav, _, _, _ = metadata
 
         image = self.images[behav[:, 0, 0].cpu().long()].float()
+        image = F.resize(image, 256)
 
-        voxel = self.fmri[behav[:, 0, 5].cpu().long()]
-        voxel = torch.Tensor(voxel)
+        voxel = self.fmri[behav[:, 0, 5].cpu().long()].float()
         voxel = voxel.unsqueeze(1)
 
         return image, voxel

@@ -84,8 +84,7 @@ if multi_gpu:
     torch.distributed.init_process_group(backend="nccl")
 
 # testing arguments
-config.pretrain_mbm_path = "/home/users/nus/li.rl/scratch/intern_kavi/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
-# config.pretrain_mbm_path = "/home/internkavi/kavi_tmp/vis_dec_neurips/checkpoints/checkpoints_pre_140_doublecontra.pth"
+config.pretrain_mbm_path = "../checkpoints/checkpoints_pre_140_doublecontra.pth"
 config.finetune_path = None
 # config.finetune_path = "results/fmri_finetune_GOD_sbj_1/02-07-2024-14-54-02/final/checkpoint_singlesub_clip_cross_att_GOD_sbj_1_fmriw0.25_imgw1.5_fmar0.75_imar0.5_fmridl6_imgdl6_pretr1_with_checkpoints_pre_140_doublecontra.pth_epo999_mergconf.pth"
 config.clip_dim = 768
@@ -241,24 +240,14 @@ if config.dataset != "NSD":
         else torch.utils.data.RandomSampler(train_set)
     )
     dataloader_hcp = DataLoader(train_set, batch_size=config.batch_size, sampler=sampler)
-    test_sampler = (
-        torch.utils.data.DistributedSampler(test_set)
-        if multi_gpu
-        else torch.utils.data.RandomSampler(test_set)
-    )
+    # test_sampler = (
+    #     torch.utils.data.DistributedSampler(test_set)
+    #     if multi_gpu
+    #     else torch.utils.data.RandomSampler(test_set)
+    # )
     dataloader_hcp_test = DataLoader(test_set, batch_size=config.batch_size, drop_last=True)
 else:
-    sampler = (
-        torch.utils.data.DistributedSampler(train_set.meta)
-        if multi_gpu
-        else torch.utils.data.RandomSampler(train_set.meta)
-    )
-    dataloader_hcp = DataLoader(train_set.meta, batch_size=config.batch_size, sampler=sampler)
-    test_sampler = (
-        torch.utils.data.DistributedSampler(train_set.meta)
-        if multi_gpu
-        else torch.utils.data.RandomSampler(train_set.meta)
-    )
+    dataloader_hcp = DataLoader(train_set.meta, batch_size=config.batch_size)
     dataloader_hcp_test = DataLoader(test_set.meta, batch_size=config.batch_size, drop_last=True)
 # %%
 start_time = time.time()
@@ -283,7 +272,7 @@ print(torchinfo.summary(model_image, depth=1))
 for ep in range(config.num_epoch):
     ckpt_file_name = f"checkpoint_singlesub_{config.wandb_name}_epo{ep}_mergconf.pth"
     ckpt_img_file_name = f"checkpoint_singlesub_{config.wandb_name}_epo{ep}_mergconf_img.pth"
-    if multi_gpu:
+    if multi_gpu and not config.dataset == "NSD":
         sampler.set_epoch(ep)
 
     # TRAIN
@@ -381,11 +370,8 @@ for ep in range(config.num_epoch):
         total_cor.append(cor)
         # total_cor_image.append(cor_image)
 
-        if data_iter_step > 100:
-            break
-
         if config.dataset == "NSD":
-            print(data_iter_step, train_set.num_items)
+            # print(data_iter_step, train_set.num_items)
             if data_iter_step >= train_set.num_items:
                 break
 
@@ -407,7 +393,8 @@ for ep in range(config.num_epoch):
         )
 
     # EVAL
-    save_ckpt = (ep % 1 == 0 and ep != 0)
+    # save_ckpt = (ep % 5 == 0 and ep != 0)
+    save_ckpt = ep % 2
     model.eval()
     model_image.eval()
     total_loss = []
@@ -497,7 +484,7 @@ for ep in range(config.num_epoch):
 
 
         if config.dataset == "NSD":
-            print(data_iter_step, test_set.num_items)
+            # print(data_iter_step, test_set.num_items)
             if data_iter_step >= test_set.num_items:
                 break
 
