@@ -234,21 +234,32 @@ else:
     test_set.fmri = test_set.fmri[:, :num_voxels]
 
 print(f"Dataset size: {len(train_set)}, {len(test_set)}")
-sampler = (
-    torch.utils.data.DistributedSampler(train_set)
-    if multi_gpu
-    else torch.utils.data.RandomSampler(train_set)
-)
-dataloader_hcp = DataLoader(train_set, batch_size=config.batch_size, sampler=sampler)
-test_sampler = (
-    torch.utils.data.DistributedSampler(test_set)
-    if multi_gpu
-    else torch.utils.data.RandomSampler(test_set)
-)
-# test_sampler = torch.utils.data.RandomSampler(test_set)
-dataloader_hcp_test = DataLoader(
-    test_set, batch_size=config.batch_size
-)
+if config.dataset != "NSD"
+    sampler = (
+        torch.utils.data.DistributedSampler(train_set)
+        if multi_gpu
+        else torch.utils.data.RandomSampler(train_set)
+    )
+    dataloader_hcp = DataLoader(train_set, batch_size=config.batch_size, sampler=sampler)
+    test_sampler = (
+        torch.utils.data.DistributedSampler(test_set)
+        if multi_gpu
+        else torch.utils.data.RandomSampler(test_set)
+    )
+    dataloader_hcp_test = DataLoader(test_set, batch_size=config.batch_size)
+else:
+    sampler = (
+        torch.utils.data.DistributedSampler(train_set.meta)
+        if multi_gpu
+        else torch.utils.data.RandomSampler(train_set.meta)
+    )
+    dataloader_hcp = DataLoader(train_set.meta, batch_size=config.batch_size, sampler=sampler)
+    test_sampler = (
+        torch.utils.data.DistributedSampler(train_set.meta)
+        if multi_gpu
+        else torch.utils.data.RandomSampler(train_set.meta)
+    )
+    dataloader_hcp_test = DataLoader(test_set.meta, batch_size=config.batch_size)
 # %%
 start_time = time.time()
 
@@ -288,14 +299,18 @@ for ep in range(config.num_epoch):
     accum_iter = config.accum_iter
 
     for data_iter_step, (data_dcit) in enumerate(dataloader_hcp):
-        samples = data_dcit["fmri"]
-        samples = samples.to(device)
+        if config.dataset != "NSD":
+            samples = data_dcit["fmri"]
 
-        images = data_dcit["image"]
-        images = images.permute(0, 3, 1, 2).float()
+            images = data_dcit["image"]
+            images = images.permute(0, 3, 1, 2).float()
+
+            image_class = data_dcit["image_class"].to(device)
+        else:
+            images, samples = train_set.get_batch(data_dcit)
+
         images = images.to(device)
-
-        image_class = data_dcit["image_class"].to(device)
+        samples = samples.to(device)
 
         optimizer.zero_grad()
         with torch.cuda.amp.autocast(enabled=True):
@@ -346,9 +361,6 @@ for ep in range(config.num_epoch):
                 f"Loss is {loss_value}, stopping training at step {data_iter_step} epoch {ep}"
             )
             sys.exit(1)
-        
-        if data_iter_step > 10:
-            break
 
         pred = pred.to("cpu").detach()
         samples = samples.to("cpu").detach()
@@ -368,7 +380,11 @@ for ep in range(config.num_epoch):
         total_loss_image.append(loss_img_recon.item())
         total_cor.append(cor)
         # total_cor_image.append(cor_image)
-        break
+
+        if config.dataset == "NSD":
+            print(data_iter_step, train_set.num_items)
+            if data_iter_step >= train_set.num_items:
+                break
 
     if logger is not None:
         lr = optimizer.param_groups[0]["lr"]
@@ -401,12 +417,18 @@ for ep in range(config.num_epoch):
     all_samples = []
 
     for data_iter_step, (data_dcit) in enumerate(dataloader_hcp_test):
-        samples = data_dcit["fmri"]
-        samples = samples.to(device)
+        if config.dataset != "NSD":
+            samples = data_dcit["fmri"]
 
-        images = data_dcit["image"]
-        images = images.permute(0, 3, 1, 2).float()
+            images = data_dcit["image"]
+            images = images.permute(0, 3, 1, 2).float()
+
+            image_class = data_dcit["image_class"].to(device)
+        else:
+            images, samples = test_set.get_batch(data_dcit)
+
         images = images.to(device)
+        samples = samples.to(device)
 
         with torch.no_grad() and torch.cuda.amp.autocast(enabled=True):
             # reconstruct fmri
@@ -443,7 +465,7 @@ for ep in range(config.num_epoch):
             )
             sys.exit(1)
 
-        if save_ckpt:
+        if save_ckpt and len(all_samples < 4):
             generated_images = model_image.generate_image(images, fmri_support, steps=50)
             combined = torch.cat([torch.stack([a_row,b_row]) for a_row, b_row in zip(images.cpu(), generated_images.cpu())])
             all_samples.append(combined)
@@ -469,6 +491,12 @@ for ep in range(config.num_epoch):
         total_loss_image.append(loss_img_recon.item())
         total_cor.append(cor)
         # total_cor_image.append(cor_image)
+
+
+        if config.dataset == "NSD":
+            print(data_iter_step, test_set.num_items)
+            if data_iter_step >= test_set.num_items:
+                break
 
     if logger is not None:
         logger.log("test_loss_step_fmri", np.mean(total_loss), step=ep)

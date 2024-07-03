@@ -91,33 +91,35 @@ def create_NSD_dataset(
     include_non_avg_test=False,
     voxel_dtype=torch.float16,
     new_test=False,
-    batch_size=4
+    batch_size=4,
 ):
     assert len(subjects) == 1, "More than one subject not supported"
     subj = subjects[0]
 
-    if not new_test: # using old test set from before full dataset released (used in original MindEye paper)
-        if subj==3:
-            num_test=2113
-        elif subj==4:
-            num_test=1985
-        elif subj==6:
-            num_test=2113
-        elif subj==8:
-            num_test=1985
+    if (
+        not new_test
+    ):  # using old test set from before full dataset released (used in original MindEye paper)
+        if subj == 3:
+            num_test = 2113
+        elif subj == 4:
+            num_test = 1985
+        elif subj == 6:
+            num_test = 2113
+        elif subj == 8:
+            num_test = 1985
         else:
-            num_test=2770
-    elif new_test: # using larger test set from after full dataset released
-        if subj==3:
-            num_test=2371
-        elif subj==4:
-            num_test=2188
-        elif subj==6:
-            num_test=2371
-        elif subj==8:
-            num_test=2188
+            num_test = 2770
+    elif new_test:  # using larger test set from after full dataset released
+        if subj == 3:
+            num_test = 2371
+        elif subj == 4:
+            num_test = 2188
+        elif subj == 6:
+            num_test = 2371
+        elif subj == 8:
+            num_test = 2188
         else:
-            num_test=3000
+            num_test = 3000
 
     base_path = Path(base_path)
     f = h5py.File(base_path / "coco_images_224_float16.hdf5", "r")
@@ -181,93 +183,71 @@ def create_NSD_dataset(
 
     num_voxels = fmri_train.shape[1]
 
-    train_dataset = NSD_dataset(
-        meta_train,
-        num_train_sessions,
-        fmri_train,
-        images,
-        fmri_transform=fmri_transform,
-        image_transform=image_transform,
-        num_voxels=num_voxels,
-        batch_size=batch_size
-    )
-    test_dataset = NSD_dataset(
-        meta_test,
-        num_test_sessions,
-        fmri_test,
-        images,
-        fmri_transform=fmri_transform,
-        image_transform=image_transform,
-        num_voxels=num_voxels,
-        batch_size=batch_size
+    return (
+        NSD_Dataset(meta_train, images, fmri_train, batch_size, num_voxels, (750*num_train_sessions) // batch_size),
+        NSD_Dataset(meta_test, images, fmri_test, batch_size, num_voxels, num_test),
     )
 
-    return train_dataset, test_dataset
 
-
-class NSD_dataset(Dataset):
-    def __init__(
-        self,
-        metadata,
-        num_sessions,
-        fmri,
-        images,
-        fmri_transform=identity,
-        image_transform=identity,
-        num_voxels=0,
-        batch_size=8
-    ):
-        self.metadata = metadata
-        self.num_sessions = num_sessions
-        self.fmri = fmri
+class NSD_Dataset:
+    def __init__(self, meta, images, fmri, batch_size, num_voxels, num_items):
+        self.meta = meta
+        self.meta = self.meta.with_length(num_items)
         self.images = images
-        self.fmri_transform = fmri_transform
-        self.image_transform = image_transform
-        self.num_voxels = num_voxels
+        self.fmri = fmri
         self.batch_size = batch_size
+        self.num_voxels = num_voxels
+        self.num_items = num_items
 
-    def __len__(self):
-        return (750*self.num_sessions) // self.batch_size
+        self.iter = 0
 
-    def __getitem__(self, index):
-        behav, _, _, _ = next(islice(self.metadata, index, index+1))
+    def get_batch(self, metadata):
+        behav, _, _, _ = metadata
 
-        img = self.images[int(behav[0, 0])].float()
-        fmri = self.fmri[int(behav[0, 5])].float()
-        fmri = fmri.unsqueeze(0)
+        image = self.images[behav[:, 0, 0].cpu().long()].float()
 
-        return {
-            "fmri": self.fmri_transform(fmri),
-            "image": self.image_transform(img),
-        }
+        voxel = self.fmri[behav[:, 0, 5].cpu().long()]
+        voxel = torch.Tensor(voxel)
+        voxel = voxel.unsqueeze(1)
 
+        return image, voxel
 
 # %% Examples
 if __name__ == "__main__":
-    data_path = Path("/home/internkavi/kavi_tmp/datasets/nsd-mind-eye")
-    f = h5py.File(data_path / "coco_images_224_float16.hdf5", "r")
-    # if you go OOM you can remove the [:] so it isnt preloaded to cpu (will require a few edits elsewhere tho)
-    images = f["images"][:]
-    images = torch.Tensor(images).to("cpu").to(torch.float16)
+    # data_path = Path("/home/internkavi/kavi_tmp/datasets/nsd-mind-eye")
+    # f = h5py.File(data_path / "coco_images_224_float16.hdf5", "r")
+    # # if you go OOM you can remove the [:] so it isnt preloaded to cpu (will require a few edits elsewhere tho)
+    # images = f["images"][:]
+    # images = torch.Tensor(images).to("cpu").to(torch.float16)
 
-    subject_metadata, subject_voxels = generate_dataset(1, 3, data_path)
+    # subject_metadata, subject_voxels = generate_dataset(1, 3, data_path)
 
-    batch_size = 1
-    dataloader = torch.utils.data.DataLoader(
-        subject_metadata.batched(batch_size), num_workers=4, batch_size=None
+    # batch_size = 1
+    # dataloader = torch.utils.data.DataLoader(
+    #     subject_metadata.batched(batch_size), num_workers=4, batch_size=None
+    # )
+    # # %%
+    # for metadata in dataloader:
+    #     image, voxel = get_batch(metadata, images, subject_voxels)
+    #     plt.subplot(2, 1, 1)
+    #     plt.imshow(torch_to_matplotlib(image))
+    #     plt.subplot(2, 1, 2)
+    #     plt.plot(voxel.T)
+    #     break
+
+    train_set, test_set = create_NSD_dataset(
+        "/home/internkavi/kavi_tmp/datasets/nsd-mind-eye", subjects=[1], batch_size=4
     )
     # %%
-    for metadata in dataloader:
-        image, voxel = get_batch(metadata, images, subject_voxels)
-        plt.subplot(2, 1, 1)
-        plt.imshow(torch_to_matplotlib(image))
-        plt.subplot(2, 1, 2)
-        plt.plot(voxel.T)
-        break
-# %%
-# train_set, test_set = create_NSD_dataset(
-#     "/home/internkavi/kavi_tmp/datasets/nsd-mind-eye",
-#     subjects=[1],
-#     batch_size=4
-# )
+    train_loader = torch.utils.data.DataLoader(
+        train_set.meta.batched(4), num_workers=4, batch_size=None
+    )
+
+    train_set.iter = 0
+    for meta in train_loader:
+        image, fmri = train_set.get_batch(meta)
+        print(train_set.iter, fmri.shape)
+        train_set.iter += 1
+        if train_set.iter >= train_set.num_items:
+            break
 # %%
