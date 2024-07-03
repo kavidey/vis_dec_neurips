@@ -90,9 +90,34 @@ def create_NSD_dataset(
     patch_size=16,
     include_non_avg_test=False,
     voxel_dtype=torch.float16,
+    new_test=False,
+    batch_size=4
 ):
     assert len(subjects) == 1, "More than one subject not supported"
-    subject_no = subjects[0]
+    subj = subjects[0]
+
+    if not new_test: # using old test set from before full dataset released (used in original MindEye paper)
+        if subj==3:
+            num_test=2113
+        elif subj==4:
+            num_test=1985
+        elif subj==6:
+            num_test=2113
+        elif subj==8:
+            num_test=1985
+        else:
+            num_test=2770
+    elif new_test: # using larger test set from after full dataset released
+        if subj==3:
+            num_test=2371
+        elif subj==4:
+            num_test=2188
+        elif subj==6:
+            num_test=2371
+        elif subj==8:
+            num_test=2188
+        else:
+            num_test=3000
 
     base_path = Path(base_path)
     f = h5py.File(base_path / "coco_images_224_float16.hdf5", "r")
@@ -106,7 +131,7 @@ def create_NSD_dataset(
     fmri_test = []
     meta_test = []
 
-    subj_id = f"subj0{subject_no}"
+    subj_id = f"subj0{subj}"
     sub_path = base_path / "wds" / subj_id
     h5path = base_path / ("betas_all_" + subj_id + "_fp32_renorm.hdf5")
 
@@ -117,6 +142,7 @@ def create_NSD_dataset(
             resampled=True,
             nodesplitter=my_split_by_node,
         )
+        .shuffle(750, initial=1500, rng=random.Random(42))
         .decode("torch")
         .rename(
             behav="behav.npy",
@@ -131,10 +157,11 @@ def create_NSD_dataset(
     betas = f["betas"][:]
     fmri_train = torch.Tensor(betas).to("cpu").to(voxel_dtype)
 
-    num_test_sessions = len(list((sub_path / "train").iterdir()))
+    test_pth = sub_path / ("test_new" if new_test else "test")
+    num_test_sessions = len(list(test_pth.iterdir()))
     meta_test = (
         wds.WebDataset(
-            str(sub_path / "test" / f"{{0..{num_test_sessions-1}}}.tar"),
+            str(test_pth / f"{{0..{num_test_sessions-1}}}.tar"),
             resampled=True,
             nodesplitter=my_split_by_node,
         )
@@ -156,19 +183,23 @@ def create_NSD_dataset(
 
     train_dataset = NSD_dataset(
         meta_train,
+        num_train_sessions,
         fmri_train,
         images,
         fmri_transform=fmri_transform,
         image_transform=image_transform,
         num_voxels=num_voxels,
+        batch_size=batch_size
     )
     test_dataset = NSD_dataset(
         meta_test,
+        num_test_sessions,
         fmri_test,
         images,
         fmri_transform=fmri_transform,
         image_transform=image_transform,
         num_voxels=num_voxels,
+        batch_size=batch_size
     )
 
     return train_dataset, test_dataset
@@ -178,28 +209,31 @@ class NSD_dataset(Dataset):
     def __init__(
         self,
         metadata,
+        num_sessions,
         fmri,
         images,
         fmri_transform=identity,
         image_transform=identity,
         num_voxels=0,
+        batch_size=8
     ):
         self.metadata = metadata
+        self.num_sessions = num_sessions
         self.fmri = fmri
         self.images = images
         self.fmri_transform = fmri_transform
         self.image_transform = image_transform
         self.num_voxels = num_voxels
+        self.batch_size = batch_size
 
     def __len__(self):
-        return len(self.fmri)
+        return (750*self.num_sessions) // self.batch_size
 
     def __getitem__(self, index):
         behav, _, _, _ = next(islice(self.metadata, index, index+1))
 
         img = self.images[int(behav[0, 0])].float()
-        fmri = self.fmri[int(behav[0, 5])]
-        fmri = torch.Tensor(fmri)
+        fmri = self.fmri[int(behav[0, 5])].float()
 
         return {
             "fmri": self.fmri_transform(fmri),
@@ -229,4 +263,10 @@ if __name__ == "__main__":
         plt.subplot(2, 1, 2)
         plt.plot(voxel.T)
         break
+# %%
+train_set, test_set = create_NSD_dataset(
+    "/home/internkavi/kavi_tmp/datasets/nsd-mind-eye",
+    subjects=[1],
+    batch_size=4
+)
 # %%
