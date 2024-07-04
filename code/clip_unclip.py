@@ -94,10 +94,10 @@ config.img_recon_weight = 1.5
 config.img_mask_ratio = 0.5
 config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
-config.dataset = "GOD"
+config.dataset = "NSD"
 config.batch_size = 4
 config.img_ca_weight = 1
-config.img_skip_weight = 1
+config.img_skip_weight = 0
 config.fmri_ca_weight = 1
 config.fmri_skip_weight = 1
 config.guidance_scale = 1
@@ -169,7 +169,6 @@ if multi_gpu:
         model,
         device_ids=[config.local_rank],
         output_device=config.local_rank,
-        find_unused_parameters=config.use_nature_img_loss,
     )
 
     model_image = torch.nn.SyncBatchNorm.convert_sync_batchnorm(model_image)
@@ -177,7 +176,6 @@ if multi_gpu:
         model_image,
         device_ids=[config.local_rank],
         output_device=config.local_rank,
-        find_unused_parameters=config.use_nature_img_loss,
     )
 
 param_groups = add_weight_decay([model, model_image], config.weight_decay)
@@ -331,7 +329,10 @@ for ep in range(config.num_epoch):
             # print(img_support.last_hidden_state.shape, fmri_support.shape)
             # torch.Size([4, 197, 768]) torch.Size([4, 292, 1024])
 
-            loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
+            if multi_gpu:
+                loss_fmri_recon = model.module.recon_loss(samples, pred, metadata[0])
+            else:
+                loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
             
         loss = (
             config.fmri_recon_weight * loss_fmri_recon
@@ -394,7 +395,7 @@ for ep in range(config.num_epoch):
 
     # EVAL
     # save_ckpt = (ep % 5 == 0 and ep != 0)
-    save_ckpt = ep % 2
+    save_ckpt = ep % 2 == 0
     model.eval()
     model_image.eval()
     total_loss = []
@@ -443,7 +444,10 @@ for ep in range(config.num_epoch):
                 fmri_support=fmri_support,
             )
 
-            loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
+            if multi_gpu:
+                loss_fmri_recon = model.module.recon_loss(samples, pred, metadata[0])
+            else:
+                loss_fmri_recon = model.recon_loss(samples, pred, metadata[0])
 
         loss = loss_fmri_recon + loss_img_recon
 
@@ -456,7 +460,10 @@ for ep in range(config.num_epoch):
             sys.exit(1)
 
         if save_ckpt and len(all_samples) == 0:
-            generated_images = model_image.generate_image(images, fmri_support, steps=50)
+            if multi_gpu:
+                generated_images = model_image.module.generate_image(images, fmri_support, steps=50)
+            else:
+                generated_images = model_image.generate_image(images, fmri_support, steps=50)
             combined = torch.cat([torch.stack([a_row,b_row]) for a_row, b_row in zip(images.cpu(), generated_images.cpu())])
             all_samples.append(combined)
 
