@@ -53,7 +53,7 @@ config.img_recon_weight = 1.5
 config.img_mask_ratio = 0.5
 config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
-config.dataset = "GOD"
+config.dataset = "NSD"
 config.batch_size = 4
 config.img_ca_weight = 1
 config.guidance_scale = 1
@@ -75,7 +75,13 @@ model_image_config.decoder_num_hidden_layers = config.img_decoder_layers
 model_image_config.hidden_size = config.clip_dim
 model_image_config.num_attention_heads = 16
 
-model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, device=device)
+# round number of voxels in NSD to multiple of 16
+if config.dataset == "NSD":
+    num_voxels = (15724//16)*16
+else:
+    num_voxels = None
+
+model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, ca_weight=config.fmri_ca_weight, skip_weight=config.fmri_skip_weight, num_voxels=num_voxels, device=device)
 model.load_state_dict(torch.load(model_ckpt_path)["model"])
 model.eval()
 model.to(device)
@@ -136,19 +142,26 @@ if test_set.fmri.shape[-1] < num_voxels:
 else:
     test_set.fmri = test_set.fmri[:, :num_voxels]
 
-dataloader_hcp = DataLoader(train_set, batch_size=config.batch_size)
-dataloader_hcp_test = DataLoader(test_set, batch_size=config.batch_size)
+if config.dataset == "NSD":
+    dataloader_hcp = DataLoader(train_set.meta, batch_size=config.batch_size)
+    dataloader_hcp_test = DataLoader(test_set.meta, batch_size=config.batch_size)
+else:
+    dataloader_hcp = DataLoader(train_set, batch_size=config.batch_size)
+    dataloader_hcp_test = DataLoader(test_set, batch_size=config.batch_size)
 # %%
 all_clip_embeddings = []
 all_fmri_embeddings = []
 
 for data_dcit in dataloader_hcp_test:
-    samples = data_dcit["fmri"]
-    samples = samples.to(device)
+    if config.dataset != "NSD":
+        samples = data_dcit["fmri"]
 
-    images = data_dcit["image"]
-    images = images.permute(0, 3, 1, 2).float()
-    images = images.to(device)
+        images = data_dcit["image"]
+        images = images.permute(0, 3, 1, 2).float()
+
+        image_class = data_dcit["image_class"].to(device)
+    else:
+        images, samples = test_set.get_batch(data_dcit)
 
     with torch.no_grad() and torch.cuda.amp.autocast(enabled=True):
         image_input = model_image.image_feature_extractor(

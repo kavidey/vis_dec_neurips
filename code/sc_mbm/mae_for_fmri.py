@@ -982,6 +982,17 @@ class MAEforFMRICross(nn.Module):
 
             return loss, pred, mask
 
+    def load_checkpoint(self, state_dict):
+        # if self.global_pool:
+        #     state_dict = {k: v for k, v in state_dict.items() if ('mask_token' not in k and 'norm' not in k)}
+        # else:
+        #     state_dict = {k: v for k, v in state_dict.items() if ('mask_token' not in k)}
+        ut.interpolate_pos_embed(self, state_dict)
+            
+        m, u = self.load_state_dict(state_dict, strict=False)
+        print('missing keys:', u)
+        print('unexpected keys:', m)
+        return 
 
 
 class fmri_encoder(nn.Module):

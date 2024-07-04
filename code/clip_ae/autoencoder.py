@@ -25,9 +25,11 @@ from sc_mbm.mae_for_image import ViTMAEConfig, ViTMAELayer
 
 
 def create_fmri_mae(
-    config, sd, config_pretrain, model_image_config, clip_dim, device=None
+    config, sd, config_pretrain, model_image_config, clip_dim, device=None, num_voxels=None
 ):
-    num_voxels = (sd["model"]["pos_embed"].shape[1] - 1) * config_pretrain.patch_size
+    if not num_voxels:
+        num_voxels = (sd["model"]["pos_embed"].shape[1] - 1) * config_pretrain.patch_size
+    
     model = MAEforFMRICross(
         num_voxels=num_voxels,
         patch_size=config_pretrain.patch_size,
@@ -45,7 +47,7 @@ def create_fmri_mae(
         decoder_depth=config.fmri_decoder_layers,
         cross_map_dim=clip_dim,
     )
-    model.load_state_dict(sd["model"], strict=False)
+    model.load_checkpoint(sd["model"])
     if device:
         model.to(device)
 
@@ -265,7 +267,7 @@ class ConditionLDM(nn.Module):
 
 class fMRICLIPAutoEncoder(nn.Module):
     def __init__(
-        self, config, model_image_config, clip_dim=1024, ca_weight=1, skip_weight=1, device=torch.device("cpu")
+        self, config, model_image_config, clip_dim=1024, num_voxels=None, ca_weight=1, skip_weight=1, device=torch.device("cpu")
     ):
         super().__init__()
 
@@ -274,7 +276,7 @@ class fMRICLIPAutoEncoder(nn.Module):
         config_pretrain = sd["config"]
 
         self.mae, self.num_voxels, self.patch_embed = create_fmri_mae(
-            config, sd, config_pretrain, model_image_config, clip_dim, device
+            config, sd, config_pretrain, model_image_config, clip_dim, device, num_voxels=num_voxels
         )
 
         self.ca_weight = ca_weight

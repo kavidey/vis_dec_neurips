@@ -153,7 +153,13 @@ model_image_config.hidden_size = config.clip_dim
 model_image_config.num_attention_heads = 16
 # print(model_image_config)
 
-model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, ca_weight=config.fmri_ca_weight, skip_weight=config.fmri_skip_weight, device=device)
+# round number of voxels in NSD to multiple of 16
+if config.dataset == "NSD":
+    num_voxels = (15724//16)*16
+else:
+    num_voxels = None
+
+model = fMRICLIPAutoEncoder(config, model_image_config, config.clip_dim, ca_weight=config.fmri_ca_weight, skip_weight=config.fmri_skip_weight, num_voxels=num_voxels, device=device)
 if config.finetune_path:
     model.load_state_dict(torch.load(config.finetune_path)["model"])
 model.to(device)
