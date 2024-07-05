@@ -95,7 +95,7 @@ config.img_mask_ratio = 0.5
 config.fmri_recon_weight = 0.25
 config.mask_ratio = 0.75
 config.dataset = "NSD"
-config.batch_size = 4
+config.batch_size = 10
 config.img_ca_weight = 1
 config.img_skip_weight = 0
 config.fmri_ca_weight = 1
@@ -216,7 +216,8 @@ elif config.dataset == "NSD":
         patch_size=config_pretrain.patch_size,
         fmri_transform=torch.FloatTensor,
         subjects=config.nsd_subs,
-        include_non_avg_test=config.include_nonavg_test
+        include_non_avg_test=config.include_nonavg_test,
+        batch_size=config.batch_size
     )
 else:
     raise NotImplementedError
@@ -467,10 +468,11 @@ for ep in range(config.num_epoch):
 
         if save_ckpt and len(all_samples) == 0:
             if multi_gpu:
-                generated_images = model_image.module.generate_image(images, fmri_support, steps=50)
+                generated_images = model_image.module.generate_image(images[:4], fmri_support[:4], steps=50)
             else:
-                generated_images = model_image.generate_image(images, fmri_support, steps=50)
+                generated_images = model_image.generate_image(images[:4], fmri_support[:4], steps=50)
             combined = torch.cat([torch.stack([a_row,b_row]) for a_row, b_row in zip(images.cpu(), generated_images.cpu())])
+            # combined = torch.cat([images.cpu(), generated_images.cpu()])
             all_samples.append(combined)
 
         # loss_scaler(img_recons_output.loss, optimizer, parameters=model_image.parameters(), clip_grad=config.clip_grad)
